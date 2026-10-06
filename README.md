@@ -31,9 +31,22 @@ Phase 0; they are added in later phases per `DECISIONS.md`.
 ## Run checks
 
 ```powershell
-pytest
+pytest               # unit + L1 tests (live-network tests deselected)
+pytest -m network    # optional live tests against NASA Exoplanet Archive / MAST
 ruff check .
 ```
+
+## Data acquisition (Phase 1)
+
+```powershell
+python scripts\fetch_wasp39b.py    # benchmark: WASP-39 b NIRSpec PRISM spectra
+```
+
+Downloads literature spectra from the NASA Exoplanet Archive into
+`data_cache/` (with SHA256 checksums) and loads them into `Spectrum`. MAST
+observation metadata / calibrated 1D products are available via
+`exosphere.data.mast` (astroquery). All responses are cached under
+`data_cache/` (gitignored).
 
 ## Repository layout
 

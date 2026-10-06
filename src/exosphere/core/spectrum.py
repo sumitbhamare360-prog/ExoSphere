@@ -85,7 +85,7 @@ class Spectrum(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _validate_contract(self) -> "Spectrum":
+    def _validate_contract(self) -> Spectrum:
         n_points = len(self.wavelength)
         if len(self.transmission) != n_points or len(self.uncertainty) != n_points:
             raise ValueError(
@@ -121,14 +121,14 @@ class Spectrum(BaseModel):
         return self.model_dump(mode="json")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Spectrum":
+    def from_dict(cls, data: dict[str, Any]) -> Spectrum:
         return cls.model_validate(data)
 
     def to_json(self) -> str:
         return self.model_dump_json()
 
     @classmethod
-    def from_json(cls, payload: str) -> "Spectrum":
+    def from_json(cls, payload: str) -> Spectrum:
         return cls.model_validate_json(payload)
 
     def save(self, path: str | Path) -> Path:
@@ -153,7 +153,7 @@ class Spectrum(BaseModel):
         return file_path
 
     @classmethod
-    def load(cls, path: str | Path) -> "Spectrum":
+    def load(cls, path: str | Path) -> Spectrum:
         """Load a spectrum written by :meth:`save`."""
         with np.load(Path(path), allow_pickle=False) as archive:
             return cls(

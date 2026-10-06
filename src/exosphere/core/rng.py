@@ -20,7 +20,7 @@ def make_seed() -> int:
 
 def make_rng(seed: int) -> np.random.Generator:
     """Build a numpy Generator that is fully determined by ``seed``."""
-    if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)):
+    if isinstance(seed, bool) or not isinstance(seed, int | np.integer):
         raise TypeError(f"seed must be an int, got {type(seed).__name__}")
     seed = int(seed)
     if not 0 <= seed <= _SEED_MAX:
@@ -36,6 +36,6 @@ class SeededRNG:
     generator: np.random.Generator
 
     @classmethod
-    def create(cls, seed: int | None = None) -> "SeededRNG":
+    def create(cls, seed: int | None = None) -> SeededRNG:
         resolved = make_seed() if seed is None else seed
         return cls(seed=int(resolved), generator=make_rng(resolved))
