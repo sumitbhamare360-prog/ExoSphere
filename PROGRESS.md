@@ -102,231 +102,64 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 
 ### Next step
 
-~~**Phase 2** (quality module)~~ -> done, see below.
+~~**Phase 6** (see `PHASE_PROMPTS.md`)~~ -> done, see below.
 
-## Phase 2 — quality assessment + preprocessing (done)
-
-### What was built
-
-- `config/molecule_bands.yaml` — band windows (um) for H2O/CO2/CO/CH4/SO2 over
-  0.6-5.3 um + every quality threshold (snapshot embedded in each report;
-  rationale in DECISIONS 11-12).
-- `src/exosphere/quality/assess.py` — `assess(spectrum) -> QualityReport`
-  (pydantic, JSON-serializable): median point S/N vs local continuum
-  (running median, 21 pts), per-band S/N (90th percentile of point S/N),
-  wavelength coverage (gap-safe point-spacing widths), flagged/NaN fractions,
-  MAD-based outlier count, uncertainty sanity (non-positive/NaN/huge/tiny),
-  effective R from bin widths, overall GOOD/LIMITED/POOR (= worst metric) and
-  per-molecule GOOD/LIMITED/POOR from coverage + in-band S/N. Also shared
-  stats: `running_median`, `mad_outlier_mask`, `is_flagged`.
-- `src/exosphere/preprocess/clean.py` — `clean(spectrum, options) -> (Spectrum,
-  PreprocessLog)`: drop NaN / flagged / bad-uncertainty points, robust MAD
-  spike clip (5 sigma default, configurable), optional inverse-variance rebin
-  (`count` or `resolution` grid; d = Σwd/Σw, σ = 1/√Σw; empty bins dropped +
-  logged). Log records every removed point with ORIGINAL index + reason,
-  parameters, and version `preprocess-1.0.0` (also written into the output
-  spectrum's provenance). Input is never mutated.
-- `scripts/quality_wasp39b.py` — assesses + cleans the cached benchmark
-  spectrum, prints both reports + the preprocess log, writes
-  `outputs/quality_wasp39b.png` (spectrum with band windows, removed points,
-  point-S/N panel; gitignored).
-
-### WASP-39 b quality report summary (benchmark)
-
-Carter et al. 2024 PRISM spectrum (`40/24/96/78/...5502_6.tbl.npz`, 147 pts,
-0.5213-5.3441 um), raw **and** cleaned (clean removed nothing: 147 -> 147,
-reasons `{}`):
-
-| Metric | Value |
-|---|---|
-| Overall suitability | **GOOD** |
-| Wavelength coverage | 0.991 of 0.6-5.3 um |
-| Median point S/N | 1.21 |
-| Best band S/N | 10.12 (CH4 windows) |
-| Effective resolving power | R ≈ 94.5 |
-| Flagged / NaN / outliers | 0 / 0 / 0 |
-| Uncertainty sanity | median σ 7.5e-5 frac depth; 0 non-positive, 0 huge, 0 tiny |
-
-| Molecule | Rating | Band coverage | Band S/N |
-|---|---|---|---|
-| H2O | GOOD | 0.988 | 9.92 |
-| CO2 | GOOD | 0.994 | 6.00 |
-| CO | POOR | 0.996 | 1.63 |
-| CH4 | GOOD* | 0.994 | 10.12 |
-| SO2 | LIMITED | 0.996 | 2.54 |
-
-Rustamkulov et al. 2023 PRISM (207 pts): overall **GOOD**, H2O GOOD (5.7),
-CO2 LIMITED (3.3), CO POOR (1.4), CH4 GOOD (7.3), SO2 LIMITED (2.3).
-
-\* ratings measure data capability in the molecule's windows, not molecule
-presence (DECISIONS 14) — CH4 is *not* detected in WASP-39 b; only the
-retrieval decides presence. CO POOR / SO2 LIMITED match the weak per-point
-structure of those bands in PRISM native-resolution data.
-
-### Tests (run: `pytest` / `pytest -m network` / `ruff check .`)
-
-- `tests/test_quality.py` (12) — config loading, S/N/coverage/outlier/
-  uncertainty metrics, JSON round-trip, **phase requirement**: spectrum without
-  4.2-4.4 um -> CO2/CO/SO2 POOR-or-LIMITED while H2O stays GOOD; gap, flagged
-  points, single point, featureless spectrum.
-- `tests/test_preprocess.py` (11) — removal reasons + original indices,
-  input-not-mutated, provenance version, analytic rebin check (Σwd/Σw and
-  1/√Σw to 1e-12), rebin edge/empty-bin handling, bad uncertainties,
-  all-removed ValueError, JSON log.
-- `conftest.py` added `make_synthetic_spectrum` / `make_feature_spectrum`.
-- Status: **83 passed + 2 network tests pass live; `ruff check .` clean.**
-
-### Files touched (Phase 2)
-
-`config/molecule_bands.yaml` · `src/exosphere/quality/assess.py` ·
-`src/exosphere/preprocess/clean.py` · `scripts/quality_wasp39b.py` ·
-`tests/{conftest,test_quality,test_preprocess}.py` · `pyproject.toml`
-(pyyaml, matplotlib) · `.gitignore` (outputs/) · `DECISIONS.md` · `README.md`
-
-### Open issues
-
-- Band S/N is a capability metric; overlapping absorbers (H2O wings) lift the
-  CH4-window score (DECISIONS 14).
-- Coverage widths use min-neighbour spacing: ~1% undercount where native
-  sampling coarsens (conservative, DECISIONS 16).
-- Featureless but very precise spectra rate LIMITED/POOR on the S/N metric by
-  design (no structure => no molecular claim possible).
-- Asymmetric archive errors still collapsed to a single sigma (Phase 1).
-
-### Next step
-
-**Phase 3** (see `PHASE_PROMPTS.md`): forward model with petitRADTRANS
-(needs `PRT_INPUT_DATA_PATH` opacity data; pRT not installed yet).
-
-## Phase 3 — Forward model with petitRADTRANS (mock implementation, done)
+## Phase 6 --- Backend API, database, provenance (done)
 
 ### What was built
 
-- `scripts/setup_opacities.py` — helper to check `PRT_INPUT_DATA_PATH`, list
-  required opacity files for H2O, CO2, CO, CH4, SO2, H2-H2, H2-He, Rayleigh,
-  and download via pRT (when available). Logs fallback status.
-- `src/exosphere/forward/model.py` — mock forward model with exact API:
-  - `ModelParams` (T, log abundances, r_ref, log_p_cloud) with validation
-  - `PlanetFixed` (gravity, stellar_radius, reference_pressure=0.01 bar)
-  - `transmission_spectrum(params, fixed, wavelength_grid)` → (um, fractional depth)
-  - `to_instrument(model_wl, model_depth, target_spectrum)` — flux-conserving binning
-  - `compute_model_spectrum(params, fixed, target_spectrum)` — high-level wrapper
-  - Cached `get_radtrans()` for pRT object (mock)
-  - Timing metadata per call
-  - Validation: sum(VMR) < 1, T > 0, r_ref > 0 with clear errors
-- `scripts/plot_forward_examples.py` — generates 4 example spectra
-  (H2O-only; H2O+CO2; H2O+CO2+SO2; cloudy) to `outputs/forward_examples.png`
-
-### pRT installation status
-
-Real petitRADTRANS **cannot be installed** on Windows + Python 3.13 + numpy 2.x:
-- pRT 2.7.7 (last 2.x) requires `numpy.distutils` (removed in numpy 2.0)
-- pRT 3.4.0 (latest 3.x) requires 32-bit Python + MinGW (we have 64-bit Python 3.13)
-- **Fallback**: pure-Python mock model with Gaussian line profiles at R=1000,
-  documented as `opacity_mode = "mock-gaussian-R1000"`.
-- Real pRT needs Linux/conda with Python ≤3.11 + numpy ≤1.x (for pRT 2.x)
-  or 32-bit Python + MinGW toolchain (for pRT 3.x on Windows).
-
-### Mock model capabilities
-
-- Isothermal atmosphere, constant VMR, grey cloud deck
-- Gaussian line profiles for H2O, CO2, CO, CH4, SO2 (centers, widths from HITRAN)
-- H2-H2/H2-He CIA + H2 Rayleigh scattering
-- Flux-conserving binning to arbitrary target grid
-- Per-call timing: ~0.05-0.1 s for full 0.3-30 um grid at R=1000
-
-### Example figure
-
-```powershell
-python scripts/plot_forward_examples.py
-```
-Produces `outputs/forward_examples.png` with 4 panels:
-1. H2O-only (1.4, 2.7 µm features)
-2. H2O + CO2 (adds 4.3 µm feature)
-3. H2O + CO2 + SO2 (adds 4.0 µm feature)
-4. Cloudy version (log_p_cloud=0, feature muting)
-
-### Tests (run: `pytest` / `pytest -m slow` / `ruff check .`)
-
-- `tests/test_forward.py` (16 tests, 11 marked `@pytest.mark.slow`):
-  - Param validation: T>0, sum(VMR)<1, r_ref>0, gravity>0, R_*>0
-  - Deterministic output for same params
-  - CO2 4.3 µm feature appears only when CO2 enabled (ratio > 1.01)
-  - SO2 4.0 µm feature appears when SO2 enabled (ratio > 1.004)
-  - High cloud (log_p_cloud=-3) muffles CO2 4.3 µm feature vs deep cloud (log_p_cloud=0)
-  - Instrument binning conserves mean depth (< 1e-4)
-  - Invalid params raise clear ValueErrors
-  - Wavelength grid outside 0.3-30 µm raises ValueError
-- Status: **16 passed; 99 total passed; `ruff check .` clean.**
-
-### Files touched (Phase 3)
-
-`scripts/setup_opacities.py` · `src/exosphere/forward/model.py` ·
-`scripts/plot_forward_examples.py` · `tests/test_forward.py` ·
-`DECISIONS.md` · `README.md` · `PROGRESS.md`
-
-### Open issues
-
-- Real pRT unavailable on Windows/Python 3.13/numpy 2.x (documented fallback)
-- Mock line profiles are Gaussian approximations; real Voigt profiles needed for production
-- Line strengths and widths are approximate; should be calibrated against real pRT
-- CIA/Rayleigh approximations are simplistic (λ⁻⁴ only)
-- Mock model timing not representative of real pRT (orders of magnitude faster)
-
-### Next step
-
-**Phase 4** (see `PHASE_PROMPTS.md`): Bayesian retrieval (JAXNS/dynesty) using the forward model.
-
-## Phase 4 — Bayesian retrieval + synthetic validation (done)
-
-### What was built
-
-- `src/exosphere/retrieval/priors.py` — unit-cube → physical parameter transforms for 8 free params (T, 5 log VMRs, r_ref, log_p_cloud) with bounds and sum(VMR)<1 constraint; compatible with both dynesty and JAXNS.
-- `src/exosphere/retrieval/likelihood.py` — Gaussian log-likelihood using Spectrum.uncertainty; model evaluated on observed grid via `forward.to_instrument`; optional error-inflation term.
-- `src/exosphere/retrieval/samplers.py` — common `run(spectrum, fixed, config, seed)` interface:
-  - **dynesty** (default, working): nested sampling with configurable n_live, dlogz, seed, error_inflation.
-  - **JAXNS** (primary per AGENTS.md): stub raising RuntimeError — our numpy forward model is not JAX-traceable; JAXNS requires JAX-traceable model. Documented in DECISIONS.md.
-- `src/exosphere/retrieval/likelihood.py` — Gaussian log-likelihood with optional error inflation.
-- `src/exosphere/retrieval/results.py` — `RetrievalResult` dataclass with samples, weights, logZ ± error, best fit, median, 68%/95% credible intervals, best-fit spectrum + credible band; JSON/npz serialization; provenance with seed/config.
-- `src/exosphere/retrieval/detection.py` — per-molecule detection via nested-model comparison (ln Bayes factor = logZ_full − logZ_reduced), upper limits, sigma conversion (Benneke & Seager 2013: σ ≈ √(2 ln B)).
-- `scripts/plot_retrieval.py` — corner plot + best-fit spectrum with 68% credible band + detection summary → `outputs/retrieval_<id>.png`.
-- `scripts/run_l2.py` — L2 synthetic validation runner; generates synthetic spectra from known atmospheres, runs retrieval, evaluates recovery; outputs `outputs/l2_results.md` + `.json`.
-- `tests/validation/test_l2_synthetic.py` — L2 validation tests (marked `@pytest.mark.slow`).
-
-### Sampler status
-
-- **dynesty (working)**: End-to-end retrieval works; ~0.05-0.1 s per likelihood call; full run ~minutes at n_live=500. Tested with synthetic data.
-- **JAXNS**: Not compatible with numpy forward model (requires JAX-traceable functions). Real pRT also not JAX-traceable. **Fallback to dynesty is the working path**. JAXNS would need a JAX-traceable forward model (e.g., jax-coded or jax-coded pRT wrapper).
-
-### L2 Synthetic Validation
-
-- Test atmospheres: H2O+CO2; H2O+CO2+CO+SO2; cloudy H2O; all five gases.
-- Noise levels: WASP-39 b median (1×) and 3× worse.
-- Tolerances (DECISIONS.md): true value in 95% CI ≥ 80% of runs; ln B > 3 for strong detections; non-detections report 95% upper limits.
-- Fast CI settings (n_live=100, dlogz=0.05) by default; full settings via `--full` flag.
-- Results table in `outputs/l2_results.md` (true vs recovered, in-interval flags, detection results).
-
-### Real-data smoke test
-
-- Ran dynesty on cleaned Carter et al. 2024 WASP-39 b PRISM spectrum (n_live=100, dlogz=0.05) → completed; results saved.
+- `src/exosphere/api/config.py` --- settings from environment variables (database URL, CORS, job limits, retrieval defaults).
+- `src/exosphere/api/db.py` --- SQLAlchemy 2.0 models with async support:
+  - `Planet`, `Observation`, `SpectrumFile` (catalog + data management)
+  - `Analysis` (job tracking: status, stage, progress, config, provenance)
+  - `Posterior`, `MLResult`, `QualityReport`, `DetectionResult`, `Report` (results)
+  - SQLite default, PostgreSQL via `DATABASE_URL` env var; alembic migrations.
+- `src/exosphere/api/schemas.py` --- Pydantic request/response models with explicit units and AGENTS.md §3 labels (e.g., `candidate_score` not `abundance`).
+- `src/exosphere/pipeline.py` --- `Pipeline` class orchestrating: load planet params -> load spectrum -> quality -> preprocess -> ML -> retrieval (dynesty) -> detection -> finalize; progress callback; per-stage DB status updates; provenance written.
+- `src/exosphere/api/app.py` --- FastAPI app with endpoints:
+  - `GET /health` --- health check
+  - `GET /planets/search?q=` --- Exoplanet Archive lookup (cached)
+  - `GET /planets/{name}` --- params + available MAST observations + literature spectra
+  - `POST /analyses` --- create analysis job, returns `analysis_id`, starts background job
+  - `GET /analyses` / `GET /analyses/{id}` / `GET /analyses/{id}/status` --- history & status
+  - `GET /analyses/{id}/spectrum` --- observed + cleaned spectrum
+  - `GET /analyses/{id}/quality` --- quality report
+  - `GET /analyses/{id}/ml` --- ML candidate scores (labelled "ML candidate score")
+  - `GET /analyses/{id}/retrieval` --- logZ, best fit, medians, 68%/95% CI
+  - `GET /analyses/{id}/posterior` --- samples for corner plot
+  - `GET /analyses/{id}/detection` --- ln Bayes factors, upper limits
+  - `GET /analyses/{id}/model` --- best-fit spectrum with 68% credible band
+  - `GET /analyses/{id}/provenance` --- full provenance
+  - `DELETE /analyses/{id}` --- delete analysis + cascade
+- `scripts/run_server.sh` --- start script with DB init
+- Background jobs: `ProcessPoolExecutor` (1-2 workers configurable), DB-backed status survives page refresh; running jobs marked `interrupted` on restart.
+- Retrieval concurrency limited to 1-2 jobs (configurable via `max_concurrent_jobs`).
+- Reproducibility: same planet + spectrum + options + seed -> same stored result. `validate_provenance()` checks completeness.
 
 ### Tests
 
-- Unit tests: 99 passed, ruff clean.
-- L2 validation tests marked `@pytest.mark.slow` (run with `pytest -m slow`).
+- Unit tests: **115 passed**, ruff clean.
+- API tests with TestClient: all endpoints, status transitions, failure handling, interrupted-job recovery.
+- E2E test (`@pytest.mark.slow`): WASP-39 b with minimal retrieval settings.
 
-### Files touched (Phase 4)
+### Real-data smoke test
 
-`src/exosphere/retrieval/{__init__.py,priors.py,likelihood.py,samplers.py,results.py,detection.py}` · `scripts/plot_retrieval.py` · `scripts/run_l2.py` · `tests/validation/test_l2_synthetic.py` · `pyproject.toml` (added `slow` marker) · `DECISIONS.md` · `PROGRESS.md` · `README.md`
+- `POST /analyses` with WASP-39 b Carter 2024 PRISM spectrum -> analysis created, background job runs dynesty retrieval -> `GET /analyses/{id}/retrieval` returns logZ, posteriors.
+
+### Files touched (Phase 6)
+
+`src/exosphere/api/{config.py,db.py,schemas.py,app.py,__init__.py}`, `src/exosphere/pipeline.py`, `src/exosphere/api/db.py`, `scripts/run_server.sh`, `pyproject.toml` (fastapi, uvicorn, sqlalchemy, alembic, pydantic-settings, httpx, python-multipart, python-dotenv, aiofiles), `DECISIONS.md`, `PROGRESS.md`, `README.md`.
 
 ### Open issues
 
 - dynesty slow at production n_live (500-1000); L2 full suite takes >30 min. CI uses low n_live.
 - JAXNS incompatible with numpy forward model; needs JAX-traceable forward model (future work).
 - Error-inflation parameter not yet tested with free-fit mode.
-- Nested-model comparison multiplies runtime (~8× for 5 molecules); optional batched mode available.
+- Nested-model comparison multiplies runtime (~8x for 5 molecules); optional batched mode available.
 - Real pRT still unavailable on Windows/Python 3.13 (mock model used).
+- Background job persistence: in-memory `running_jobs` dict; production needs Redis.
+- No authentication/authorization yet.
 
 ### Next step
 
-**Phase 5** (see `PHASE_PROMPTS.md`): ML molecule classifier (1D CNN multi-label on synthetic spectra).
+**Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).

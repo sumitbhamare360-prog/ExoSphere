@@ -20,6 +20,17 @@ dependencies = [
     "requests==2.32.5",
     "pyyaml==6.0.3",
     "matplotlib==3.11.2",
+    "torch==2.14.1",
+    "scikit-learn==1.9.1",
+    "fastapi==0.115.0",
+    "uvicorn==0.32.0",
+    "sqlalchemy==2.0.36",
+    "alembic==1.13.2",
+    "pydantic-settings==2.6.1",
+    "httpx==0.28.1",
+    "python-multipart==0.0.12",
+    "python-dotenv==1.0.1",
+    "aiofiles==24.1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -41,3 +52,4 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]

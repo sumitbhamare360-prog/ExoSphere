@@ -210,3 +210,52 @@ is logged here.
 27. **Performance**: dynesty ~0.05-0.1 s/likelihood call at n_live=500;
     full run ~5-15 min. L2 full suite (4 cases × 2 noise × 3 seeds = 24 runs)
     takes ~30-60 min at production settings. CI uses n_live=50-100, dlogz=0.5.
+
+## Phase 5 (2026-10-07)
+
+28. **ML label definition — "molecule present"**: A molecule is labelled present
+    if its log VMR ≥ -6 AND its noiseless feature amplitude (max depth deviation
+    in its band windows from molecule_bands.yaml, vs. the same model with that
+    molecule removed) exceeds 1× the per-point noise level of that sample.
+    Otherwise absent. This ties labels to detectability, not just abundance.
+    Rationale: an abundant molecule with no spectral signature in the observed
+    band is not detectable; a weaker molecule with a strong feature may be.
+    Labels are computed from noiseless spectra to avoid noise-induced label
+    flipping. Stored in dataset metadata for reproducibility.
+
+29. **Dataset generation**: Synthetic spectra generated using forward/model.py
+    with atmosphere parameters sampled from priors (T ∈ [300, 2500] K,
+    log VMR ∈ [-12, -1], r_ref ∈ [0.7, 1.3] × catalog, log_p_cloud ∈ [-6, 2]),
+    ~40% chance per molecule to be set to log VMR = -12 (absent). Spectra
+    computed on native grid, then binned to cleaned WASP-39 b PRISM wavelength
+    grid (147 points, 0.52-5.34 µm). Gaussian noise added: per-point
+    uncertainty sampled from 0.5× to 5× the WASP-39 b median uncertainty
+    profile; plus small random vertical offset (σ=1e-4) and 5% uncertainty
+    mis-estimation as domain randomization. Dataset version hash recorded.
+    Target: 20k samples (CI: 3k). Stored in data_cache/ml/ as npz + metadata.
+
+30. **Model architecture**: 1D CNN, 2 input channels (depth, uncertainty),
+    multi-label sigmoid output for 5 molecules. Architecture: 4 conv blocks
+    (conv1d + batchnorm + relu + maxpool), channels [32, 64, 128, 256],
+    global avg pool, dropout(0.3), dense(128), dropout(0.2), dense(5) + sigmoid.
+    BCE loss, Adam(1e-3), batch=64. Train/val/test split by unique atmosphere
+    config hash (no leakage). Early stopping on val BCE (patience=10).
+
+31. **Training**: seeded (torch.manual_seed, numpy, random), deterministic
+    cuDNN. Early stopping on val BCE (patience=10, min_delta=1e-4).
+    Checkpoint saves: model state, optimizer state, epoch, metrics, dataset
+    hash, model version (e.g., CNN-v1), provenance seed. Metrics: per-molecule
+    ROC-AUC, precision/recall@0.5, ECE (10 bins), per-S/N-bin performance.
+    Artifacts saved to models/ with versioned filenames.
+
+31. **Inference**: predict(spectrum) → MLResult with per-molecule scores
+    labelled "ML candidate score (not abundance, not a detection)".
+    Input spectrum interpolated to training grid (WASP-39 b PRISM grid);
+    warns if coverage < 90% or grid mismatch. Output includes model version,
+    dataset hash, per-molecule scores, calibration flag. JSON serializable.
+    Run on real cleaned WASP-39 b spectrum; compare to published (H2O, CO2,
+    SO2 expected; CH4 not). Report agreements/failures + domain gap note.
+
+32. **Tests**: label function unit test; dataset generation seeded/reproducible
+    (small N=100); model forward pass shapes; predict() output schema +
+    labelling; tiny overfit test (model fits 50 samples to near-zero loss).

@@ -9,14 +9,16 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from exosphere.core.provenance import Provenance
 from exosphere.core.spectrum import Spectrum
 from exosphere.forward.model import PlanetFixed
-from exosphere.retrieval.samplers import SamplerConfig
+
+if TYPE_CHECKING:
+    from exosphere.retrieval.samplers import SamplerConfig
 
 
 @dataclass
