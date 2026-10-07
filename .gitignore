@@ -17,6 +17,7 @@ htmlcov/
 # Project data
 data_cache/
 *.npz
+outputs/
 
 # Editors / OS
 .vscode/

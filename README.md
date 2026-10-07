@@ -48,6 +48,20 @@ observation metadata / calibrated 1D products are available via
 `exosphere.data.mast` (astroquery). All responses are cached under
 `data_cache/` (gitignored).
 
+## Quality assessment + preprocessing (Phase 2)
+
+```powershell
+python scripts\quality_wasp39b.py   # assess + clean the cached spectrum, write outputs\quality_wasp39b.png
+```
+
+- `config/molecule_bands.yaml` - molecule band windows + ALL quality thresholds.
+- `exosphere.quality.assess(spectrum)` - JSON-serializable `QualityReport`:
+  overall GOOD/LIMITED/POOR suitability + per-molecule rating (data capability
+  in that molecule's windows, not molecule presence).
+- `exosphere.preprocess.clean(spectrum, options)` - drops NaN/flagged/bad-sigma
+  points, robust MAD spike clip, optional inverse-variance rebin; returns a new
+  `Spectrum` + `PreprocessLog` (input never mutated).
+
 ## Repository layout
 
 ```

@@ -210,8 +210,12 @@ def mad_outlier_mask(
     z_valid = z[valid]
     centre = float(np.median(z_valid))
     mad = float(np.median(np.abs(z_valid - centre)))
-    robust_sigma = _MAD_CONSTANT * mad
-    if not np.isfinite(robust_sigma) or robust_sigma <= 0.0:
+    # The threshold is never tighter than n_sigma in units of the QUOTED
+    # uncertainty: MAD only raises it when the data scatter exceeds sigma, but
+    # must not shrink it for spectra that are smoother than their error bars
+    # (otherwise a noiseless smooth spectrum would be over-clipped).
+    robust_sigma = max(_MAD_CONSTANT * mad, 1.0)
+    if not np.isfinite(robust_sigma):
         robust_sigma = 1.0
     local_outliers = np.abs(z - centre) > float(n_sigma) * robust_sigma
     local_outliers[~valid] = False
@@ -414,7 +418,8 @@ def assess(spectrum: Spectrum, config: QualityConfig | None = None) -> QualityRe
     outlier_fraction = float(outliers_usable / n_usable) if n_usable else 0.0
 
     # --- uncertainty sanity ---------------------------------------------
-    median_depth = float(np.median(depth[np.isfinite(depth)])) if np.any(np.isfinite(depth)) else None
+    finite_depth = depth[np.isfinite(depth)]
+    median_depth = float(np.median(finite_depth)) if finite_depth.size else None
     finite_sigma = sigma[np.isfinite(sigma)]
     median_sigma = float(np.median(finite_sigma)) if finite_sigma.size else None
     huge_limit = (
@@ -442,16 +447,35 @@ def assess(spectrum: Spectrum, config: QualityConfig | None = None) -> QualityRe
 
     # --- overall wavelength coverage ------------------------------------
     nominal_lo, nominal_hi = cfg.nominal_range
-    bin_lo, bin_hi = edges[:-1], edges[1:]
+    # Coverage bins come from the local point spacing, not from
+    # wavelength_bin_edges: the edges must tile the full range (N+1 values), so
+    # a bin spanning an internal wavelength gap would otherwise claim coverage
+    # of the gap itself.
+    if n_points >= 2:
+        gaps = np.diff(wave)
+        point_widths = np.empty(n_points, dtype=np.float64)
+        point_widths[0] = gaps[0]
+        point_widths[-1] = gaps[-1]
+        if n_points > 2:
+            point_widths[1:-1] = np.minimum(gaps[:-1], gaps[1:])
+    else:
+        point_widths = np.array(
+            [float(edges[1] - edges[0]) if edges.size == 2 else 1.0],
+            dtype=np.float64,
+        )
+    bin_lo = wave - point_widths / 2.0
+    bin_hi = wave + point_widths / 2.0
     overall_coverage = _band_coverage(bin_lo, bin_hi, usable, (nominal_lo, nominal_hi))
     if n_points == 0:
         overall_coverage = 0.0
 
     # --- effective resolving power R = lambda / dlambda (bin widths) -----
-    widths = bin_hi - bin_lo
-    valid_r = (widths > 0) & np.isfinite(widths) & (wave > 0)
+    edge_widths = edges[1:] - edges[:-1] if edges.size >= 2 else point_widths
+    valid_r = (edge_widths > 0) & np.isfinite(edge_widths) & (wave > 0)
     resolving_power = (
-        float(np.median(wave[valid_r] / widths[valid_r])) if bool(np.any(valid_r)) else None
+        float(np.median(wave[valid_r] / edge_widths[valid_r]))
+        if bool(np.any(valid_r))
+        else None
     )
 
     # --- per-molecule rating --------------------------------------------

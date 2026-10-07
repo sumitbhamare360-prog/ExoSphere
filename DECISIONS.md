@@ -54,3 +54,70 @@ is logged here.
    substitution).
 10. **Live-network tests** are marked `@pytest.mark.network` and deselected by
     default (`addopts = "-m 'not network'"`); run them with `pytest -m network`.
+
+## Phase 2 (2026-10-06)
+
+11. **`config/molecule_bands.yaml`** holds both the band windows (the windows
+    given in the phase prompt, with source comments: H2O near-IR
+    combination/overtone bands, CO2 2.0/2.7/4.3, CO 2.3/4.7, CH4 1.6/2.3/3.3,
+    SO2 3.9-4.2 - the 7.7 SO2 fundamental is outside PRISM coverage) and ALL
+    data-quality thresholds. One file so the quality gate is auditable; the
+    loaded threshold snapshot is embedded in every `QualityReport`.
+12. **Thresholds (calibrated against the two cached WASP-39 b PRISM spectra):**
+    - overall wavelength coverage: GOOD >= 0.7, POOR < 0.4 of 0.6-5.3 um.
+    - molecule band coverage: GOOD >= 0.6, POOR < 0.3 (bandwidth-weighted over
+      all of that molecule's windows).
+    - band S/N: GOOD >= 5, POOR < 2 (was 10/5 as a first guess; measured
+      benchmark band S/N is ~6-10 for well-detected bands, ~1.5 for absent
+      ones, so 10 would have misrated the benchmark as LIMITED).
+    - overall suitability S/N metric: best (max) molecule-band S/N against the
+      same 5/2 thresholds: does ANY window show structure above the noise?
+    - bad-point (flagged+NaN) fraction: GOOD <= 0.1, POOR > 0.5.
+    - outlier fraction: GOOD <= 0.05, POOR > 0.25; point count: GOOD >= 50,
+      POOR < 10.
+    - uncertainty sanity: sigma > 10% of the median transit depth = "huge";
+      sigma < 1e-10 (fractional depth, i.e. 1e-4 ppm) = "tiny".
+    Overall suitability = WORST metric (conservative gate, AGENTS rule 3).
+13. **S/N definitions.** Point S/N = |depth - running_median(depth, 21 pts)| /
+    sigma (the phase-prescribed method); the report's `median_snr` is the
+    median over usable points. **Band S/N = 90th percentile of the point S/N
+    inside the molecule's windows**: the median is dominated by featureless
+    points inside a band and the bare maximum is a single noise fluctuation.
+    Overall suitability uses the best band S/N; `median_snr` alone would rate
+    every real spectrum POOR because most bins sit on the continuum.
+14. **Per-molecule rating = data capability, NOT molecule presence.** It
+    answers "are this molecule's windows covered with enough structure above
+    noise that the data could support it?" - attribution belongs to the
+    retrieval (AGENTS 1/3). Consequence: CH4 rates GOOD on WASP-39 b (its
+    windows show >5 sigma structure from overlapping absorbers) even though
+    the retrieval finds no CH4. Documented in `QualityReport.method`.
+15. **Outlier detection is a neighbour-prediction MAD clip, not a
+    continuum-MAD clip.** First implementation clipped against a running-median
+    continuum and destroyed real features (any feature narrower than the
+    continuum window is flagged, and GOOD spectra have strong features). Final
+    rule: r_i = d_i - (d_{i-1}+d_{i+1})/2, sigma_eff from the three quoted
+    sigmas, z = r/sigma_eff, flag |z - median(z)| > n_sigma * max(1.4826*MAD(z),
+    1.0). The floor at 1.0 means the threshold is never tighter than n_sigma of
+    the QUOTED error (MAD only raises it when the data scatter exceeds sigma);
+    without the floor, a noiseless smooth spectrum is over-clipped. Endpoints
+    and points across gaps (>3x median sampling gap) are never flagged.
+    Same function (`mad_outlier_mask`) used by assess and clean. Default 5
+    sigma, configurable (`CleanOptions.clip_n_sigma`).
+16. **Coverage widths come from local point spacing** (min of the two
+    neighbour gaps), not from `wavelength_bin_edges`: N+1 edges must tile the
+    range, so a bin spanning an internal gap would claim coverage of the gap.
+    Cost: ~1% undercount where the native sampling coarsens (acceptable,
+    conservative). Resolving power still uses the actual bin edges.
+17. **Quality flags:** pass sentinels are `""` and `"OK"` (Phase 1 loaders
+    write "OK"); anything else is flagged and excluded from usable points.
+18. **Preprocessing (`preprocess/clean.py`, version `preprocess-1.0.0`):**
+    removal order NaN -> flagged -> bad uncertainty -> MAD spike clip, each
+    recorded with the ORIGINAL input index + reason; rebin (optional) is
+    inverse-variance: d = sum(w d)/sum(w), sigma = 1/sqrt(sum(w)), w = 1/sigma^2,
+    empty grid cells dropped (never interpolated into) and logged; bin edges
+    recomputed from surviving centers + original bin widths; the version string
+    is written into the output Spectrum's `provenance.preprocessing_version`
+    (input untouched - `clean` never mutates).
+19. **New dependencies:** `pyyaml==6.0.3` (band/threshold config) and
+    `matplotlib==3.11.2` (diagnostic plots only; scripts force the Agg
+    backend).

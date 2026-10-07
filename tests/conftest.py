@@ -1,10 +1,14 @@
-"""Shared fixtures for Phase 1 data-acquisition tests."""
+"""Shared fixtures and synthetic-spectrum helpers for the test suite."""
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from exosphere.core.provenance import Provenance
+from exosphere.core.spectrum import Spectrum
+from exosphere.data.loaders.binning import bin_edges_from_centers
+from exosphere.quality.assess import load_quality_config
 
 # Source values (microns / percent) taken from the NASA Exoplanet Archive
 # download of the WASP-39 b NIRSpec PRISM transmission spectrum
@@ -84,3 +88,72 @@ def ipac_tbl_path(tmp_path):
     path = tmp_path / "WASP_39_b_prism.tbl"
     path.write_text(make_ipac_tbl(), encoding="utf-8")
     return path
+
+
+def make_synthetic_spectrum(
+    wavelength,
+    transmission,
+    uncertainty,
+    *,
+    provenance: Provenance | None = None,
+    quality_flags=None,
+    observation_id: str = "synthetic-001",
+    target_id: str = "SYNTH b",
+    instrument: str = "NIRSpec PRISM",
+    bin_width: float | None = None,
+) -> Spectrum:
+    """Build a Spectrum on a regular grid (bin edges from bin centers).
+
+    ``bin_width`` is required only for a single-point spectrum, where no
+    neighbor spacing exists to infer the bin size from.
+    """
+    wave = np.asarray(wavelength, dtype=np.float64)
+    if wave.size == 1:
+        if bin_width is None:
+            raise ValueError("bin_width is required for a single-point spectrum")
+        edges = [float(wave[0] - bin_width / 2), float(wave[0] + bin_width / 2)]
+    else:
+        edges = bin_edges_from_centers(wave)
+    return Spectrum(
+        wavelength=[float(v) for v in wave],
+        transmission=[float(v) for v in transmission],
+        uncertainty=[float(v) for v in uncertainty],
+        wavelength_bin_edges=edges,
+        quality_flags=list(quality_flags) if quality_flags is not None else [],
+        observation_id=observation_id,
+        target_id=target_id,
+        instrument=instrument,
+        provenance=provenance or Provenance(analysis_id="EXO-000001", planet="SYNTH b"),
+    )
+
+
+def make_feature_spectrum(
+    lo: float = 0.6,
+    hi: float = 5.3,
+    n_points: int = 400,
+    noise_sigma: float = 2e-5,
+    baseline: float = 0.015,
+    amplitude: float = 5e-4,
+    seed: int = 7,
+    molecules: tuple[str, ...] = ("H2O", "CO2", "CO", "CH4", "SO2"),
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Synthetic transmission spectrum with smooth molecular band bumps.
+
+    Every selected molecule window gets a Gaussian bump centred in the window
+    with width = window/4 and the given amplitude (default = 25 x noise), so
+    the band S/N (90th percentile of deviation/sigma) is well above threshold.
+    Deterministic for a given seed.
+    """
+    rng = np.random.default_rng(seed)
+    wave = np.linspace(lo, hi, n_points)
+    depth = np.full(n_points, baseline, dtype=np.float64)
+    config = load_quality_config()
+    for molecule in molecules:
+        for window_lo, window_hi in config.molecule_bands[molecule]:
+            center = (window_lo + window_hi) / 2.0
+            width = max((window_hi - window_lo) / 4.0, 0.02)
+            bump = amplitude * np.exp(-0.5 * ((wave - center) / width) ** 2)
+            depth = depth + bump
+    depth = depth + rng.normal(0.0, noise_sigma, n_points)
+    sigma = np.full(n_points, noise_sigma, dtype=np.float64)
+    return wave, depth, sigma

@@ -102,5 +102,98 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 
 ### Next step
 
-**Phase 2** (see `PHASE_PROMPTS.md`): data-quality module (GOOD/LIMITED/POOR +
-per-molecule rating, AGENTS.md §6) on top of the ingested `Spectrum`.
+~~**Phase 2** (quality module)~~ -> done, see below.
+
+## Phase 2 — quality assessment + preprocessing (done)
+
+### What was built
+
+- `config/molecule_bands.yaml` — band windows (um) for H2O/CO2/CO/CH4/SO2 over
+  0.6-5.3 um + every quality threshold (snapshot embedded in each report;
+  rationale in DECISIONS 11-12).
+- `src/exosphere/quality/assess.py` — `assess(spectrum) -> QualityReport`
+  (pydantic, JSON-serializable): median point S/N vs local continuum
+  (running median, 21 pts), per-band S/N (90th percentile of point S/N),
+  wavelength coverage (gap-safe point-spacing widths), flagged/NaN fractions,
+  MAD-based outlier count, uncertainty sanity (non-positive/NaN/huge/tiny),
+  effective R from bin widths, overall GOOD/LIMITED/POOR (= worst metric) and
+  per-molecule GOOD/LIMITED/POOR from coverage + in-band S/N. Also shared
+  stats: `running_median`, `mad_outlier_mask`, `is_flagged`.
+- `src/exosphere/preprocess/clean.py` — `clean(spectrum, options) -> (Spectrum,
+  PreprocessLog)`: drop NaN / flagged / bad-uncertainty points, robust MAD
+  spike clip (5 sigma default, configurable), optional inverse-variance rebin
+  (`count` or `resolution` grid; d = Σwd/Σw, σ = 1/√Σw; empty bins dropped +
+  logged). Log records every removed point with ORIGINAL index + reason,
+  parameters, and version `preprocess-1.0.0` (also written into the output
+  spectrum's provenance). Input is never mutated.
+- `scripts/quality_wasp39b.py` — assesses + cleans the cached benchmark
+  spectrum, prints both reports + the preprocess log, writes
+  `outputs/quality_wasp39b.png` (spectrum with band windows, removed points,
+  point-S/N panel; gitignored).
+
+### WASP-39 b quality report summary (benchmark)
+
+Carter et al. 2024 PRISM spectrum (`40/24/96/78/...5502_6.tbl.npz`, 147 pts,
+0.5213-5.3441 um), raw **and** cleaned (clean removed nothing: 147 -> 147,
+reasons `{}`):
+
+| Metric | Value |
+|---|---|
+| Overall suitability | **GOOD** |
+| Wavelength coverage | 0.991 of 0.6-5.3 um |
+| Median point S/N | 1.21 |
+| Best band S/N | 10.12 (CH4 windows) |
+| Effective resolving power | R ≈ 94.5 |
+| Flagged / NaN / outliers | 0 / 0 / 0 |
+| Uncertainty sanity | median σ 7.5e-5 frac depth; 0 non-positive, 0 huge, 0 tiny |
+
+| Molecule | Rating | Band coverage | Band S/N |
+|---|---|---|---|
+| H2O | GOOD | 0.988 | 9.92 |
+| CO2 | GOOD | 0.994 | 6.00 |
+| CO | POOR | 0.996 | 1.63 |
+| CH4 | GOOD* | 0.994 | 10.12 |
+| SO2 | LIMITED | 0.996 | 2.54 |
+
+Rustamkulov et al. 2023 PRISM (207 pts): overall **GOOD**, H2O GOOD (5.7),
+CO2 LIMITED (3.3), CO POOR (1.4), CH4 GOOD (7.3), SO2 LIMITED (2.3).
+
+\* ratings measure data capability in the molecule's windows, not molecule
+presence (DECISIONS 14) — CH4 is *not* detected in WASP-39 b; only the
+retrieval decides presence. CO POOR / SO2 LIMITED match the weak per-point
+structure of those bands in PRISM native-resolution data.
+
+### Tests (run: `pytest` / `pytest -m network` / `ruff check .`)
+
+- `tests/test_quality.py` (12) — config loading, S/N/coverage/outlier/
+  uncertainty metrics, JSON round-trip, **phase requirement**: spectrum without
+  4.2-4.4 um -> CO2/CO/SO2 POOR-or-LIMITED while H2O stays GOOD; gap, flagged
+  points, single point, featureless spectrum.
+- `tests/test_preprocess.py` (11) — removal reasons + original indices,
+  input-not-mutated, provenance version, analytic rebin check (Σwd/Σw and
+  1/√Σw to 1e-12), rebin edge/empty-bin handling, bad uncertainties,
+  all-removed ValueError, JSON log.
+- `conftest.py` added `make_synthetic_spectrum` / `make_feature_spectrum`.
+- Status: **83 passed + 2 network tests pass live; `ruff check .` clean.**
+
+### Files touched (Phase 2)
+
+`config/molecule_bands.yaml` · `src/exosphere/quality/assess.py` ·
+`src/exosphere/preprocess/clean.py` · `scripts/quality_wasp39b.py` ·
+`tests/{conftest,test_quality,test_preprocess}.py` · `pyproject.toml`
+(pyyaml, matplotlib) · `.gitignore` (outputs/) · `DECISIONS.md` · `README.md`
+
+### Open issues
+
+- Band S/N is a capability metric; overlapping absorbers (H2O wings) lift the
+  CH4-window score (DECISIONS 14).
+- Coverage widths use min-neighbour spacing: ~1% undercount where native
+  sampling coarsens (conservative, DECISIONS 16).
+- Featureless but very precise spectra rate LIMITED/POOR on the S/N metric by
+  design (no structure => no molecular claim possible).
+- Asymmetric archive errors still collapsed to a single sigma (Phase 1).
+
+### Next step
+
+**Phase 3** (see `PHASE_PROMPTS.md`): forward model with petitRADTRANS
+(needs `PRT_INPUT_DATA_PATH` opacity data; pRT not installed yet).
