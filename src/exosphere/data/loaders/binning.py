@@ -19,9 +19,7 @@ def bin_edges_from_centers(centers, widths=None) -> list[float]:
         raise ValueError("cannot build bin edges from an empty wavelength array")
     if n == 1:
         if widths is None:
-            raise ValueError(
-                "cannot infer bin edges for a single point without bin widths"
-            )
+            raise ValueError("cannot infer bin edges for a single point without bin widths")
         w = np.asarray(widths, dtype=float)
         if not (np.isfinite(w[0]) and w[0] > 0):
             raise ValueError("bin width must be > 0 for a single-point spectrum")
@@ -35,12 +33,7 @@ def bin_edges_from_centers(centers, widths=None) -> list[float]:
     use_widths = widths is not None
     if use_widths:
         w = np.asarray(widths, dtype=float)
-        use_widths = bool(
-            w.shape == c.shape
-            and np.all(np.isfinite(w))
-            and w[0] > 0
-            and w[-1] > 0
-        )
+        use_widths = bool(w.shape == c.shape and np.all(np.isfinite(w)) and w[0] > 0 and w[-1] > 0)
 
     first_gap = (c[1] - c[0]) / 2.0
     if use_widths:

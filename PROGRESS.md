@@ -197,3 +197,136 @@ structure of those bands in PRISM native-resolution data.
 
 **Phase 3** (see `PHASE_PROMPTS.md`): forward model with petitRADTRANS
 (needs `PRT_INPUT_DATA_PATH` opacity data; pRT not installed yet).
+
+## Phase 3 — Forward model with petitRADTRANS (mock implementation, done)
+
+### What was built
+
+- `scripts/setup_opacities.py` — helper to check `PRT_INPUT_DATA_PATH`, list
+  required opacity files for H2O, CO2, CO, CH4, SO2, H2-H2, H2-He, Rayleigh,
+  and download via pRT (when available). Logs fallback status.
+- `src/exosphere/forward/model.py` — mock forward model with exact API:
+  - `ModelParams` (T, log abundances, r_ref, log_p_cloud) with validation
+  - `PlanetFixed` (gravity, stellar_radius, reference_pressure=0.01 bar)
+  - `transmission_spectrum(params, fixed, wavelength_grid)` → (um, fractional depth)
+  - `to_instrument(model_wl, model_depth, target_spectrum)` — flux-conserving binning
+  - `compute_model_spectrum(params, fixed, target_spectrum)` — high-level wrapper
+  - Cached `get_radtrans()` for pRT object (mock)
+  - Timing metadata per call
+  - Validation: sum(VMR) < 1, T > 0, r_ref > 0 with clear errors
+- `scripts/plot_forward_examples.py` — generates 4 example spectra
+  (H2O-only; H2O+CO2; H2O+CO2+SO2; cloudy) to `outputs/forward_examples.png`
+
+### pRT installation status
+
+Real petitRADTRANS **cannot be installed** on Windows + Python 3.13 + numpy 2.x:
+- pRT 2.7.7 (last 2.x) requires `numpy.distutils` (removed in numpy 2.0)
+- pRT 3.4.0 (latest 3.x) requires 32-bit Python + MinGW (we have 64-bit Python 3.13)
+- **Fallback**: pure-Python mock model with Gaussian line profiles at R=1000,
+  documented as `opacity_mode = "mock-gaussian-R1000"`.
+- Real pRT needs Linux/conda with Python ≤3.11 + numpy ≤1.x (for pRT 2.x)
+  or 32-bit Python + MinGW toolchain (for pRT 3.x on Windows).
+
+### Mock model capabilities
+
+- Isothermal atmosphere, constant VMR, grey cloud deck
+- Gaussian line profiles for H2O, CO2, CO, CH4, SO2 (centers, widths from HITRAN)
+- H2-H2/H2-He CIA + H2 Rayleigh scattering
+- Flux-conserving binning to arbitrary target grid
+- Per-call timing: ~0.05-0.1 s for full 0.3-30 um grid at R=1000
+
+### Example figure
+
+```powershell
+python scripts/plot_forward_examples.py
+```
+Produces `outputs/forward_examples.png` with 4 panels:
+1. H2O-only (1.4, 2.7 µm features)
+2. H2O + CO2 (adds 4.3 µm feature)
+3. H2O + CO2 + SO2 (adds 4.0 µm feature)
+4. Cloudy version (log_p_cloud=0, feature muting)
+
+### Tests (run: `pytest` / `pytest -m slow` / `ruff check .`)
+
+- `tests/test_forward.py` (16 tests, 11 marked `@pytest.mark.slow`):
+  - Param validation: T>0, sum(VMR)<1, r_ref>0, gravity>0, R_*>0
+  - Deterministic output for same params
+  - CO2 4.3 µm feature appears only when CO2 enabled (ratio > 1.01)
+  - SO2 4.0 µm feature appears when SO2 enabled (ratio > 1.004)
+  - High cloud (log_p_cloud=-3) muffles CO2 4.3 µm feature vs deep cloud (log_p_cloud=0)
+  - Instrument binning conserves mean depth (< 1e-4)
+  - Invalid params raise clear ValueErrors
+  - Wavelength grid outside 0.3-30 µm raises ValueError
+- Status: **16 passed; 99 total passed; `ruff check .` clean.**
+
+### Files touched (Phase 3)
+
+`scripts/setup_opacities.py` · `src/exosphere/forward/model.py` ·
+`scripts/plot_forward_examples.py` · `tests/test_forward.py` ·
+`DECISIONS.md` · `README.md` · `PROGRESS.md`
+
+### Open issues
+
+- Real pRT unavailable on Windows/Python 3.13/numpy 2.x (documented fallback)
+- Mock line profiles are Gaussian approximations; real Voigt profiles needed for production
+- Line strengths and widths are approximate; should be calibrated against real pRT
+- CIA/Rayleigh approximations are simplistic (λ⁻⁴ only)
+- Mock model timing not representative of real pRT (orders of magnitude faster)
+
+### Next step
+
+**Phase 4** (see `PHASE_PROMPTS.md`): Bayesian retrieval (JAXNS/dynesty) using the forward model.
+
+## Phase 4 — Bayesian retrieval + synthetic validation (done)
+
+### What was built
+
+- `src/exosphere/retrieval/priors.py` — unit-cube → physical parameter transforms for 8 free params (T, 5 log VMRs, r_ref, log_p_cloud) with bounds and sum(VMR)<1 constraint; compatible with both dynesty and JAXNS.
+- `src/exosphere/retrieval/likelihood.py` — Gaussian log-likelihood using Spectrum.uncertainty; model evaluated on observed grid via `forward.to_instrument`; optional error-inflation term.
+- `src/exosphere/retrieval/samplers.py` — common `run(spectrum, fixed, config, seed)` interface:
+  - **dynesty** (default, working): nested sampling with configurable n_live, dlogz, seed, error_inflation.
+  - **JAXNS** (primary per AGENTS.md): stub raising RuntimeError — our numpy forward model is not JAX-traceable; JAXNS requires JAX-traceable model. Documented in DECISIONS.md.
+- `src/exosphere/retrieval/likelihood.py` — Gaussian log-likelihood with optional error inflation.
+- `src/exosphere/retrieval/results.py` — `RetrievalResult` dataclass with samples, weights, logZ ± error, best fit, median, 68%/95% credible intervals, best-fit spectrum + credible band; JSON/npz serialization; provenance with seed/config.
+- `src/exosphere/retrieval/detection.py` — per-molecule detection via nested-model comparison (ln Bayes factor = logZ_full − logZ_reduced), upper limits, sigma conversion (Benneke & Seager 2013: σ ≈ √(2 ln B)).
+- `scripts/plot_retrieval.py` — corner plot + best-fit spectrum with 68% credible band + detection summary → `outputs/retrieval_<id>.png`.
+- `scripts/run_l2.py` — L2 synthetic validation runner; generates synthetic spectra from known atmospheres, runs retrieval, evaluates recovery; outputs `outputs/l2_results.md` + `.json`.
+- `tests/validation/test_l2_synthetic.py` — L2 validation tests (marked `@pytest.mark.slow`).
+
+### Sampler status
+
+- **dynesty (working)**: End-to-end retrieval works; ~0.05-0.1 s per likelihood call; full run ~minutes at n_live=500. Tested with synthetic data.
+- **JAXNS**: Not compatible with numpy forward model (requires JAX-traceable functions). Real pRT also not JAX-traceable. **Fallback to dynesty is the working path**. JAXNS would need a JAX-traceable forward model (e.g., jax-coded or jax-coded pRT wrapper).
+
+### L2 Synthetic Validation
+
+- Test atmospheres: H2O+CO2; H2O+CO2+CO+SO2; cloudy H2O; all five gases.
+- Noise levels: WASP-39 b median (1×) and 3× worse.
+- Tolerances (DECISIONS.md): true value in 95% CI ≥ 80% of runs; ln B > 3 for strong detections; non-detections report 95% upper limits.
+- Fast CI settings (n_live=100, dlogz=0.05) by default; full settings via `--full` flag.
+- Results table in `outputs/l2_results.md` (true vs recovered, in-interval flags, detection results).
+
+### Real-data smoke test
+
+- Ran dynesty on cleaned Carter et al. 2024 WASP-39 b PRISM spectrum (n_live=100, dlogz=0.05) → completed; results saved.
+
+### Tests
+
+- Unit tests: 99 passed, ruff clean.
+- L2 validation tests marked `@pytest.mark.slow` (run with `pytest -m slow`).
+
+### Files touched (Phase 4)
+
+`src/exosphere/retrieval/{__init__.py,priors.py,likelihood.py,samplers.py,results.py,detection.py}` · `scripts/plot_retrieval.py` · `scripts/run_l2.py` · `tests/validation/test_l2_synthetic.py` · `pyproject.toml` (added `slow` marker) · `DECISIONS.md` · `PROGRESS.md` · `README.md`
+
+### Open issues
+
+- dynesty slow at production n_live (500-1000); L2 full suite takes >30 min. CI uses low n_live.
+- JAXNS incompatible with numpy forward model; needs JAX-traceable forward model (future work).
+- Error-inflation parameter not yet tested with free-fit mode.
+- Nested-model comparison multiplies runtime (~8× for 5 molecules); optional batched mode available.
+- Real pRT still unavailable on Windows/Python 3.13 (mock model used).
+
+### Next step
+
+**Phase 5** (see `PHASE_PROMPTS.md`): ML molecule classifier (1D CNN multi-label on synthetic spectra).

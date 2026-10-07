@@ -36,8 +36,7 @@ def _pick_cached_spectrum(explicit: str | None) -> Path:
     candidates = sorted(benchmark_dir.glob("*.npz"))
     if not candidates:
         raise SystemExit(
-            f"no cached benchmark spectrum in {benchmark_dir}\n"
-            "run: python scripts/fetch_wasp39b.py"
+            f"no cached benchmark spectrum in {benchmark_dir}\nrun: python scripts/fetch_wasp39b.py"
         )
     return candidates[0]
 
@@ -63,12 +62,18 @@ def _plot(spectrum, cleaned, report_before, report_after, log, output_path: Path
     )
 
     # Molecule band windows (measured vs. modelled labelling per AGENTS.md 4)
-    band_colors = {"H2O": "#1f77b4", "CO2": "#d62728", "CO": "#2ca02c",
-                   "CH4": "#9467bd", "SO2": "#ff7f0e"}
+    band_colors = {
+        "H2O": "#1f77b4",
+        "CO2": "#d62728",
+        "CO": "#2ca02c",
+        "CH4": "#9467bd",
+        "SO2": "#ff7f0e",
+    }
     for molecule, windows in config.molecule_bands.items():
         for index, (lo, hi) in enumerate(windows):
             axis_depth.axvspan(
-                lo, hi,
+                lo,
+                hi,
                 alpha=0.12,
                 color=band_colors.get(molecule, "gray"),
                 label=f"{molecule} band" if index == 0 else None,
@@ -76,19 +81,35 @@ def _plot(spectrum, cleaned, report_before, report_after, log, output_path: Path
             )
 
     axis_depth.errorbar(
-        wave, depth * 1e6, yerr=sigma * 1e6,
-        fmt=".", markersize=3, color="0.55", elinewidth=0.7,
-        label="input (measured)", zorder=1,
+        wave,
+        depth * 1e6,
+        yerr=sigma * 1e6,
+        fmt=".",
+        markersize=3,
+        color="0.55",
+        elinewidth=0.7,
+        label="input (measured)",
+        zorder=1,
     )
     if removed_indices:
         axis_depth.scatter(
-            wave[removed_indices], depth[removed_indices] * 1e6,
-            marker="x", s=45, color="red", linewidths=1.4,
-            label=f"removed ({len(removed_indices)})", zorder=3,
+            wave[removed_indices],
+            depth[removed_indices] * 1e6,
+            marker="x",
+            s=45,
+            color="red",
+            linewidths=1.4,
+            label=f"removed ({len(removed_indices)})",
+            zorder=3,
         )
     axis_depth.plot(
-        clean_wave, clean_depth * 1e6, "-", color="#003366",
-        linewidth=1.2, label="cleaned (modelled by preprocess)", zorder=2,
+        clean_wave,
+        clean_depth * 1e6,
+        "-",
+        color="#003366",
+        linewidth=1.2,
+        label="cleaned (modelled by preprocess)",
+        zorder=2,
     )
     axis_depth.set_ylabel("Transit depth [ppm]")
     axis_depth.set_title(
@@ -104,10 +125,20 @@ def _plot(spectrum, cleaned, report_before, report_after, log, output_path: Path
     with np.errstate(divide="ignore", invalid="ignore"):
         point_snr = np.abs(clean_depth - continuum) / clean_sigma
     axis_snr.plot(clean_wave, point_snr, ".", markersize=3, color="#003366")
-    axis_snr.axhline(config.thresholds["molecule_snr_good"], color="green",
-                     linestyle="--", linewidth=1, label="band S/N good (5)")
-    axis_snr.axhline(config.thresholds["molecule_snr_limited"], color="orange",
-                     linestyle="--", linewidth=1, label="band S/N limited (2)")
+    axis_snr.axhline(
+        config.thresholds["molecule_snr_good"],
+        color="green",
+        linestyle="--",
+        linewidth=1,
+        label="band S/N good (5)",
+    )
+    axis_snr.axhline(
+        config.thresholds["molecule_snr_limited"],
+        color="orange",
+        linestyle="--",
+        linewidth=1,
+        label="band S/N limited (2)",
+    )
     axis_snr.set_xlabel("Wavelength [um]")
     axis_snr.set_ylabel("Point S/N\n(|depth - continuum| / sigma)")
     axis_snr.set_ylim(bottom=0)
@@ -116,9 +147,11 @@ def _plot(spectrum, cleaned, report_before, report_after, log, output_path: Path
 
     ratings = ", ".join(f"{m.molecule} {m.rating}" for m in report_after.molecules)
     figure.text(
-        0.5, 0.005,
+        0.5,
+        0.005,
         f"per-molecule (cleaned): {ratings}",
-        ha="center", fontsize=9,
+        ha="center",
+        fontsize=9,
     )
     figure.tight_layout(rect=(0, 0.02, 1, 1))
     output_path.parent.mkdir(parents=True, exist_ok=True)

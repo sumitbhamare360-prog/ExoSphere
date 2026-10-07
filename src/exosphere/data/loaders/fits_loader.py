@@ -57,9 +57,7 @@ def _resolve_column(hdu, requested: str | None, candidates, kind: str) -> str:
         for name in names:
             if name.lower() == requested.lower():
                 return name
-        raise ValueError(
-            f"{kind} column {requested!r} not found; available columns are {names}"
-        )
+        raise ValueError(f"{kind} column {requested!r} not found; available columns are {names}")
     for candidate in candidates:
         for name in names:
             if name.lower() == candidate.lower():
@@ -71,8 +69,7 @@ def _resolve_column(hdu, requested: str | None, candidates, kind: str) -> str:
             "A flux-only x1d spectrum cannot be converted to a transit depth."
         )
     raise ValueError(
-        f"{kind} column not found (looked for {list(candidates)}); "
-        f"available columns are {names}"
+        f"{kind} column not found (looked for {list(candidates)}); available columns are {names}"
     )
 
 
@@ -100,9 +97,7 @@ def load_x1d_fits(
         wavelength_name = _resolve_column(
             hdu, wavelength_column, _WAVELENGTH_CANDIDATES, "wavelength"
         )
-        depth_name = _resolve_column(
-            hdu, depth_column, _DEPTH_CANDIDATES, "transit depth"
-        )
+        depth_name = _resolve_column(hdu, depth_column, _DEPTH_CANDIDATES, "transit depth")
         uncertainty_name = _resolve_column(
             hdu, uncertainty_column, _UNCERTAINTY_CANDIDATES, "uncertainty"
         )
@@ -120,9 +115,7 @@ def load_x1d_fits(
 
         edges_name = None
         if bin_edges_column is not None:
-            edges_name = _resolve_column(
-                hdu, bin_edges_column, _BIN_EDGES_CANDIDATES, "bin edges"
-            )
+            edges_name = _resolve_column(hdu, bin_edges_column, _BIN_EDGES_CANDIDATES, "bin edges")
         else:
             for candidate in _BIN_EDGES_CANDIDATES:
                 for name in names:
@@ -132,9 +125,7 @@ def load_x1d_fits(
 
     wavelength = wavelength_to_um(_as_float(wavelength_raw), effective_wavelength_unit)
     transmission = depth_to_fraction(_as_float(depth_raw), depth_unit)
-    uncertainty = depth_to_fraction(
-        _as_float(uncertainty_raw), uncertainty_unit or depth_unit
-    )
+    uncertainty = depth_to_fraction(_as_float(uncertainty_raw), uncertainty_unit or depth_unit)
 
     valid = (
         np.isfinite(wavelength)

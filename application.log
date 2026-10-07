@@ -1,0 +1,2 @@
+2026-10-07 14:13:23,758 INFO     xla_bridge.py:837 backends            jax._src.xla_bridge: Unable to initialize backend 'tpu': UNIMPLEMENTED: LoadPjrtPlugin is not implemented on windows yet.
+2026-10-07 14:13:48,496 INFO     xla_bridge.py:837 backends            jax._src.xla_bridge: Unable to initialize backend 'tpu': UNIMPLEMENTED: LoadPjrtPlugin is not implemented on windows yet.

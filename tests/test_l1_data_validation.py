@@ -23,9 +23,7 @@ def test_l1_source_to_spectrum_and_back(tmp_path):
     # Spectrum -> source convention: fraction -> percent, um stays um.
     round_trip_wavelength = np.asarray(spectrum.wavelength, dtype=float)
     round_trip_depth_percent = np.asarray(spectrum.transmission, dtype=float) * 100.0
-    round_trip_uncertainty_percent = (
-        np.asarray(spectrum.uncertainty, dtype=float) * 100.0
-    )
+    round_trip_uncertainty_percent = np.asarray(spectrum.uncertainty, dtype=float) * 100.0
 
     source_wavelength = np.array([float(row[0]) for row in PRISM_SOURCE_ROWS])
     source_depth_percent = np.array([float(row[2]) for row in PRISM_SOURCE_ROWS])

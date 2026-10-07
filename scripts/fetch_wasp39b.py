@@ -62,9 +62,7 @@ def _report_available(spectra: list[LiteratureSpectrum]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", default=DEFAULT_TARGET)
-    parser.add_argument(
-        "--refresh", action="store_true", help="ignore cached archive responses"
-    )
+    parser.add_argument("--refresh", action="store_true", help="ignore cached archive responses")
     args = parser.parse_args(argv)
 
     out_dir = load_config().data_cache_dir / "benchmark"
@@ -106,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
             source_archive="NASA Exoplanet Archive (Atmospheric Spectroscopy table)",
             input_data_version=spectrum.bibcode,
         )
-        loaded = get_spectrum(spectrum, provenance=provenance, cache_dir=cache_dir,
-                              refresh=args.refresh)
+        loaded = get_spectrum(
+            spectrum, provenance=provenance, cache_dir=cache_dir, refresh=args.refresh
+        )
         raw_path = cached_spectrum_path(spectrum.spec_path, cache_dir)
         checksum = sha256_of_file(raw_path)
         sidecar = raw_path.with_suffix(raw_path.suffix + ".sha256")

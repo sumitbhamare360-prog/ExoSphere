@@ -58,9 +58,7 @@ def load_csv(
         _column(frame, wavelength_column).to_numpy(dtype=float), wavelength_unit
     )
     source_depth_unit = uncertainty_unit or depth_unit
-    transmission = depth_to_fraction(
-        _column(frame, depth_column).to_numpy(dtype=float), depth_unit
-    )
+    transmission = depth_to_fraction(_column(frame, depth_column).to_numpy(dtype=float), depth_unit)
     uncertainty = depth_to_fraction(
         _column(frame, uncertainty_column).to_numpy(dtype=float), source_depth_unit
     )

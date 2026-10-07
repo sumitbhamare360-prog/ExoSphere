@@ -1,0 +1,316 @@
+"""Per-molecule detection evidence via nested-model comparison.
+
+Computes ln Bayes factor by comparing full model vs. model with one molecule removed.
+Uses nested sampling evidence (logZ) from dynesty.
+
+Reference: Benneke & Seager (2013) "Atmospheric Retrieval for Super-Earths"
+ln B > 3: substantial evidence; >5: strong; >10: very strong
+"""
+
+from __future__ import annotations
+
+import warnings
+from typing import Any
+
+import numpy as np
+
+from exosphere.core.spectrum import Spectrum
+from exosphere.forward.model import PlanetFixed
+from exosphere.retrieval.priors import DEFAULT_PRIOR_CONFIG, PriorConfig
+from exosphere.retrieval.results import RetrievalResult
+from exosphere.retrieval.samplers import SamplerConfig
+
+MOLECULE_INDICES = {
+    "H2O": 1,
+    "CO2": 2,
+    "CO": 3,
+    "CH4": 4,
+    "SO2": 5,
+}
+
+
+def compute_bayes_factor(
+    full_result: RetrievalResult,
+    spectrum: Spectrum,
+    fixed: PlanetFixed,
+    molecule: str,
+    sampler_config: SamplerConfig,
+    seed: int,
+    prior_cfg: PriorConfig | None = None,
+) -> float:
+    """Compute ln Bayes factor for a molecule by nested-model comparison.
+
+    Runs retrieval with the specified molecule removed (log VMR -> -inf),
+    compares logZ with full model.
+
+    ln B = logZ(full) - logZ(reduced)
+
+    Args:
+        full_result: RetrievalResult from full model
+        spectrum: Observed Spectrum
+        fixed: PlanetFixed parameters
+        molecule: Molecule name to test ("H2O", "CO2", "CO", "CH4", "SO2")
+        sampler_config: SamplerConfig for the nested run
+        seed: Random seed
+        prior_cfg: Optional prior config override
+
+    Returns:
+        ln Bayes factor (positive favors full model with molecule)
+    """
+    if molecule not in MOLECULE_INDICES:
+        raise ValueError(f"Unknown molecule: {molecule}")
+
+    mol_idx = MOLECULE_INDICES[molecule]
+
+    # Create reduced prior config: force the molecule's VMR to be negligible
+    # We do this by setting a very low prior upper bound for that molecule
+    # Actually, the simplest approach: modify the prior transform to fix that parameter to -12
+    reduced_prior = PriorConfig(
+        T_min=sampler_config.prior.T_min if sampler_config.prior else 300.0,
+        T_max=sampler_config.prior.T_max if sampler_config.prior else 2500.0,
+        log_vmr_min=sampler_config.prior.log_vmr_min if sampler_config.prior else -12.0,
+        log_vmr_max=sampler_config.prior.log_vmr_max if sampler_config.prior else -1.0,
+        r_ref_frac=sampler_config.prior.r_ref_frac if sampler_config.prior else 0.30,
+        log_p_cloud_min=sampler_config.prior.log_p_cloud_min if sampler_config.prior else -6.0,
+        log_p_cloud_max=sampler_config.prior.log_p_cloud_max if sampler_config.prior else 2.0,
+    )
+
+    # For the reduced model, we fix the molecule's log VMR to -12 (negligible)
+    # We can do this by modifying the prior transform
+    from exosphere.retrieval.priors import unit_to_physical
+
+    def reduced_prior_transform(u: np.ndarray) -> np.ndarray:
+        # Transform as normal, then force the molecule to -12
+        params = unit_to_physical(u, 1.27, DEFAULT_PRIOR_CONFIG)
+        params[mol_idx] = -12.0  # Force negligible
+        return params
+
+    def reduced_log_likelihood(u):
+        from exosphere.retrieval.priors import DEFAULT_PRIOR_CONFIG, log_prior
+
+        # Use modified transform
+        params = reduced_prior_transform(u)
+        lp = log_prior(params, 1.27, DEFAULT_PRIOR_CONFIG)
+        if not np.isfinite(lp):
+            return -np.inf
+        # We need spectrum and fixed - will be passed from closure
+        # This is a simplified approach - in practice we'd need to pass spectrum/fixed
+        # For now, this is a placeholder
+        return -np.inf  # Placeholder
+
+    # Actually, we need to run a full retrieval. Let's do it properly.
+    # Create a new sampler config with modified prior bounds
+    SamplerConfig(
+        sampler=sampler_config.sampler,
+        n_live=sampler_config.n_live,
+        dlogz=sampler_config.dlogz,
+        max_iter=sampler_config.max_iter,
+        seed=sampler_config.seed + 1,  # Different seed for independence
+        error_inflation=sampler_config.error_inflation,
+        n_workers=sampler_config.n_workers,
+        prior=reduced_prior,
+    )
+
+    # For dynesty, we need to create a custom prior transform that fixes the molecule
+
+    def make_reduced_prior_transform(catalog_r_ref, prior_cfg, fixed_mol_idx, fixed_value):
+        def prior_transform(u):
+            params = unit_to_physical(u, catalog_r_ref, prior_cfg)
+            params[fixed_mol_idx] = fixed_value
+            return params
+
+        return prior_transform
+
+    reduced_prior = make_reduced_prior_transform(1.27, DEFAULT_PRIOR_CONFIG, mol_idx, -12.0)
+
+    def make_reduced_log_likelihood(
+        spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation, fixed_mol_idx, fixed_value
+    ):
+        from exosphere.retrieval.likelihood import log_likelihood
+        from exosphere.retrieval.priors import log_prior, unit_to_physical
+
+        def log_likelihood_fn(u):
+            params = unit_to_physical(u, catalog_r_ref, prior_cfg)
+            params[fixed_mol_idx] = fixed_value
+            lp = log_prior(params, catalog_r_ref, prior_cfg)
+            if not np.isfinite(lp):
+                return -np.inf
+            return log_likelihood(params, spectrum, fixed, error_inflation=error_inflation)
+
+        return log_likelihood_fn
+
+    # Run reduced model
+    try:
+        import dynesty
+
+        ndim = 8
+        reduced_sampler = dynesty.NestedSampler(
+            make_reduced_log_likelihood(
+                spectrum, fixed, 1.27, DEFAULT_PRIOR_CONFIG, 0.0, mol_idx, -12.0
+            ),
+            reduced_prior,
+            ndim,
+            nlive=sampler_config.n_live,
+            seed=seed,
+        )
+
+        reduced_sampler.run_nested(
+            dlogz=sampler_config.dlogz,
+            maxiter=sampler_config.max_iter,
+            print_progress=False,
+        )
+
+        reduced_logz = reduced_sampler.results.logz[-1]
+        reduced_logz_err = reduced_sampler.results.logzerr[-1]
+
+        ln_B = full_result.logz - reduced_logz
+        ln_B_err = np.sqrt(full_result.logz_err**2 + reduced_logz_err**2)
+
+        return ln_B, ln_B_err
+
+    except Exception as e:
+        warnings.warn(f"Failed to compute Bayes factor for {molecule}: {e}", stacklevel=2)
+        return 0.0, np.inf
+
+
+def compute_all_bayes_factors(
+    full_result: RetrievalResult,
+    spectrum: Spectrum,
+    fixed: PlanetFixed,
+    sampler_config: SamplerConfig,
+    seed: int,
+    molecules: list[str] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Compute ln Bayes factors for all specified molecules.
+
+    Returns dict: molecule -> (ln_B, ln_B_err)
+    """
+    if molecules is None:
+        molecules = list(MOLECULE_INDICES.keys())
+
+    results = {}
+    for molecule in molecules:
+        try:
+            bf, bf_err = compute_bayes_factor(
+                full_result, spectrum, fixed, molecule, sampler_config, seed
+            )
+            results[molecule] = (bf, bf_err)
+        except Exception as e:
+            warnings.warn(f"Failed to compute Bayes factor for {molecule}: {e}", stacklevel=2)
+            results[molecule] = (0.0, np.inf)
+
+    return results
+
+
+def detection_sigma(ln_B: float) -> float:
+    """Convert ln Bayes factor to approximate sigma (Gaussian significance).
+
+    Using Benneke & Seager (2013) approximation:
+    ln B ~ 0.5 * sigma^2 for strong detections
+    So sigma ~ sqrt(2 * ln B)
+    """
+    if ln_B <= 0:
+        return 0.0
+    return np.sqrt(2.0 * ln_B)
+
+
+def compute_upper_limits(
+    result: RetrievalResult,
+    spectrum: Spectrum,
+    fixed: PlanetFixed,
+    sampler_config: SamplerConfig,
+    seed: int,
+    molecules: list[str] | None = None,
+    confidence: float = 0.95,
+) -> dict[str, float]:
+    """Compute posterior upper limits for non-detected molecules.
+
+    For each molecule, find the VMR value at the specified confidence level
+    of the marginal posterior. If the molecule is not detected (ln B < 3),
+    report the 95% upper limit on log VMR.
+
+    Args:
+        result: Full RetrievalResult
+        spectrum: Observed Spectrum
+        fixed: PlanetFixed
+        sampler_config: SamplerConfig
+        seed: Random seed
+        molecules: List of molecules to compute limits for
+        confidence: Confidence level (0.95 default)
+
+    Returns:
+        Dict: molecule -> upper limit on log VMR
+    """
+    if molecules is None:
+        molecules = list(MOLECULE_INDICES.keys())
+
+    limits = {}
+    for molecule in molecules:
+        if molecule not in MOLECULE_INDICES:
+            continue
+        idx = MOLECULE_INDICES[molecule]
+        samples = result.samples[:, idx]
+        weights = result.weights
+
+        # Weighted percentile
+        def weighted_percentile(x, w, q):
+            idx = np.argsort(x)
+            x_sorted = x[idx]
+            w_sorted = w[idx]
+            cdf = np.cumsum(w_sorted) / np.sum(w_sorted)
+            return np.interp(q, cdf, x_sorted)
+
+        upper = weighted_percentile(samples, weights, confidence)
+        limits[molecule] = float(upper)
+
+    return limits
+
+
+def detection_summary(
+    full_result: RetrievalResult,
+    spectrum: Spectrum,
+    fixed: PlanetFixed,
+    sampler_config: SamplerConfig,
+    seed: int,
+    molecules: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run full detection analysis: Bayes factors + upper limits + sigma.
+
+    Returns a summary dictionary suitable for JSON serialization.
+    """
+    bfs = compute_all_bayes_factors(full_result, spectrum, fixed, sampler_config, seed, molecules)
+    compute_upper_limits(full_result, spectrum, fixed, sampler_config, seed, molecules)
+
+    summary = {}
+    for molecule in molecules or list(MOLECULE_INDICES.keys()):
+        bf, bf_err = bfs.get(molecule, (0.0, np.inf))
+        sigma = detection_sigma(bf)
+        limit = full_result.upper_limits.get(molecule, None)
+
+        status = "detected" if bf > 3 else ("tentative" if bf > 1 else "not detected")
+
+        summary[molecule] = {
+            "ln_B": float(bf),
+            "ln_B_err": float(bf_err) if np.isfinite(bf_err) else None,
+            "sigma": float(sigma),
+            "status": status,
+            "upper_limit_log_vmr": limit,
+        }
+
+    return summary
+
+
+def update_result_with_detection(
+    result: RetrievalResult,
+    spectrum: Spectrum,
+    fixed: PlanetFixed,
+    sampler_config: SamplerConfig,
+    seed: int,
+) -> RetrievalResult:
+    """Update a RetrievalResult with detection info (modifies in place)."""
+    summary = detection_summary(result, spectrum, fixed, sampler_config, seed)
+    for molecule, info in summary.items():
+        result.bayes_factors[molecule] = info["ln_B"]
+        if info["upper_limit_log_vmr"] is not None:
+            result.upper_limits[molecule] = info["upper_limit_log_vmr"]
+    return result

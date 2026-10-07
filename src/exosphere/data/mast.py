@@ -139,8 +139,7 @@ def search_jwst_observations(
                 by_group.setdefault(group, []).append(product_row)
         for observation in observations:
             observation.products = [
-                _product_info(product_row)
-                for product_row in by_group.get(observation.obsid, [])
+                _product_info(product_row) for product_row in by_group.get(observation.obsid, [])
             ]
     return observations
 
@@ -172,14 +171,10 @@ def _resolve_product_table(obs_id: str, product) -> Table:
     for index, row in enumerate(product_table):
         if str(row["productFilename"]) == product_name:
             return product_table[index : index + 1]
-    raise MASTError(
-        f"product {product_name!r} not found among products of obs_id {obs_id!r}"
-    )
+    raise MASTError(f"product {product_name!r} not found among products of obs_id {obs_id!r}")
 
 
-def download_product(
-    obs_id: str, product, *, cache_dir: Path | None = None
-) -> Path:
+def download_product(obs_id: str, product, *, cache_dir: Path | None = None) -> Path:
     """Download one chosen calibrated 1D product into ``data_cache/mast/``.
 
     ``product`` may be a product filename, a ProductInfo, or an astropy
@@ -211,8 +206,7 @@ def download_product(
         status = manifest[0]["Status"]
         message = manifest[0]["Message"]
         raise MASTError(
-            f"download of {info.product_filename!r} failed: status={status}, "
-            f"message={message}"
+            f"download of {info.product_filename!r} failed: status={status}, message={message}"
         )
     return local_path
 

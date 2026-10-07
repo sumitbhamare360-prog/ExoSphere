@@ -48,8 +48,7 @@ def wavelength_to_um(values, unit: str) -> np.ndarray:
         result = (array * u.Unit(canonical)).to(u.um)
     except (ValueError, u.UnitsError) as exc:
         raise ValueError(
-            f"unsupported wavelength unit {unit!r}; "
-            f"use one of {sorted(set(WAVELENGTH_ALIASES))}"
+            f"unsupported wavelength unit {unit!r}; use one of {sorted(set(WAVELENGTH_ALIASES))}"
         ) from exc
     return result.value
 
@@ -62,7 +61,6 @@ def depth_to_fraction(values, unit: str) -> np.ndarray:
     key = str(unit).strip().lower()
     if key not in DEPTH_FACTORS:
         raise ValueError(
-            f"unsupported depth unit {unit!r}; "
-            f"use one of {sorted(set(DEPTH_FACTORS))}"
+            f"unsupported depth unit {unit!r}; use one of {sorted(set(DEPTH_FACTORS))}"
         )
     return np.asarray(values, dtype=float) * DEPTH_FACTORS[key]

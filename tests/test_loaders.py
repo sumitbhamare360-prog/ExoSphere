@@ -22,8 +22,7 @@ def test_load_archive_tbl_converts_source_units(ipac_tbl_path, provenance):
     source_wavelength = [float(row[0]) for row in PRISM_SOURCE_ROWS]
     source_depth = [float(row[2]) / 100.0 for row in PRISM_SOURCE_ROWS]
     source_uncertainty = [
-        (abs(float(row[3])) + abs(float(row[4]))) / 2.0 / 100.0
-        for row in PRISM_SOURCE_ROWS
+        (abs(float(row[3])) + abs(float(row[4]))) / 2.0 / 100.0 for row in PRISM_SOURCE_ROWS
     ]
 
     np.testing.assert_allclose(spectrum.wavelength, source_wavelength, rtol=1e-12)
@@ -44,9 +43,7 @@ def test_load_archive_tbl_converts_source_units(ipac_tbl_path, provenance):
 
 def test_load_archive_tbl_falls_back_to_radius_ratio(tmp_path, provenance):
     path = tmp_path / "ratio_only.tbl"
-    path.write_text(
-        make_ipac_tbl(include_depth=False, include_ratio=True), encoding="utf-8"
-    )
+    path.write_text(make_ipac_tbl(include_depth=False, include_ratio=True), encoding="utf-8")
     spectrum = load_archive_tbl(path, provenance=provenance)
 
     expected_depth = [
@@ -86,9 +83,7 @@ def test_load_csv_converts_nm_and_ppm(tmp_path, provenance):
         depth_unit="ppm",
     )
     np.testing.assert_allclose(spectrum.wavelength, [1.0, 1.1, 1.2], rtol=1e-12)
-    np.testing.assert_allclose(
-        spectrum.transmission, [0.0208997, 0.0211727, 0.0214191], rtol=1e-12
-    )
+    np.testing.assert_allclose(spectrum.transmission, [0.0208997, 0.0211727, 0.0214191], rtol=1e-12)
     np.testing.assert_allclose(spectrum.uncertainty, [2.571e-5, 1.765e-5, 1.276e-5])
     assert len(spectrum.wavelength_bin_edges) == 4
 
@@ -178,9 +173,7 @@ def test_load_x1d_fits_requires_wavelength_unit(tmp_path, provenance):
 
 def test_wavelength_and_depth_conversions():
     np.testing.assert_allclose(wavelength_to_um([1000.0, 5000.0], "nm"), [1.0, 5.0])
-    np.testing.assert_allclose(
-        wavelength_to_um([10000.0], "Angstrom"), [1.0], rtol=1e-12
-    )
+    np.testing.assert_allclose(wavelength_to_um([10000.0], "Angstrom"), [1.0], rtol=1e-12)
     np.testing.assert_allclose(depth_to_fraction([100.0], "percent"), [1.0])
     np.testing.assert_allclose(depth_to_fraction([1e6], "ppm"), [1.0])
     with pytest.raises(ValueError, match="unsupported wavelength unit"):

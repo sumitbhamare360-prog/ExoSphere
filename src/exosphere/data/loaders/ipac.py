@@ -153,9 +153,7 @@ def load_archive_tbl(
         transmissions.append(depth_value)
         uncertainties.append(uncertainty_value)
         upper_limit = bool(
-            lim_arr is not None
-            and not _is_masked(lim_col, index)
-            and lim_arr[index] == 1
+            lim_arr is not None and not _is_masked(lim_col, index) and lim_arr[index] == 1
         )
         flags.append("UPPER_LIMIT" if upper_limit else "OK")
 
@@ -169,13 +167,9 @@ def load_archive_tbl(
     resolved_target = target_id or _keyword(meta, "PL_NAME")
     resolved_instrument = instrument or _keyword(meta, "INSTRUMENT")
     if not resolved_target:
-        raise ValueError(
-            f"{file_path.name}: PL_NAME header keyword missing; pass target_id"
-        )
+        raise ValueError(f"{file_path.name}: PL_NAME header keyword missing; pass target_id")
     if not resolved_instrument:
-        raise ValueError(
-            f"{file_path.name}: INSTRUMENT header keyword missing; pass instrument"
-        )
+        raise ValueError(f"{file_path.name}: INSTRUMENT header keyword missing; pass instrument")
 
     return Spectrum(
         wavelength=[float(value) for value in kept_wavelength],

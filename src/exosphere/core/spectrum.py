@@ -46,12 +46,8 @@ def _as_str_list(value: Any) -> Any:
 class Spectrum(BaseModel):
     """Calibrated/extracted 1D transit transmission spectrum."""
 
-    wavelength: list[float] = Field(
-        description=f"Wavelength grid in {WAVELENGTH_UNIT}, ascending."
-    )
-    transmission: list[float] = Field(
-        description=f"Transit depth in {TRANSMISSION_UNIT}."
-    )
+    wavelength: list[float] = Field(description=f"Wavelength grid in {WAVELENGTH_UNIT}, ascending.")
+    transmission: list[float] = Field(description=f"Transit depth in {TRANSMISSION_UNIT}.")
     uncertainty: list[float] = Field(
         description=f"1-sigma uncertainty on transit depth in {UNCERTAINTY_UNIT}; > 0."
     )
@@ -140,9 +136,7 @@ class Spectrum(BaseModel):
             "wavelength": np.asarray(self.wavelength, dtype=np.float64),
             "transmission": np.asarray(self.transmission, dtype=np.float64),
             "uncertainty": np.asarray(self.uncertainty, dtype=np.float64),
-            "wavelength_bin_edges": np.asarray(
-                self.wavelength_bin_edges, dtype=np.float64
-            ),
+            "wavelength_bin_edges": np.asarray(self.wavelength_bin_edges, dtype=np.float64),
             "quality_flags": np.asarray(self.quality_flags, dtype=str),
             "observation_id": np.asarray(self.observation_id),
             "target_id": np.asarray(self.target_id),
@@ -165,7 +159,5 @@ class Spectrum(BaseModel):
                 observation_id=str(archive["observation_id"].item()),
                 target_id=str(archive["target_id"].item()),
                 instrument=str(archive["instrument"].item()),
-                provenance=Provenance.model_validate_json(
-                    str(archive["provenance_json"].item())
-                ),
+                provenance=Provenance.model_validate_json(str(archive["provenance_json"].item())),
             )

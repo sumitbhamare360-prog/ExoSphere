@@ -89,9 +89,7 @@ class QualityConfig:
         thresholds: dict[str, float] = {}
         thresholds.update({f"coverage_{k}": float(v) for k, v in quality["overall"].items()})
         thresholds.update({f"molecule_{k}": float(v) for k, v in quality["molecule"].items()})
-        thresholds.update(
-            {f"uncertainty_{k}": float(v) for k, v in quality["uncertainty"].items()}
-        )
+        thresholds.update({f"uncertainty_{k}": float(v) for k, v in quality["uncertainty"].items()})
         lo, hi = raw["wavelength_range_um"]
         return cls(
             molecule_bands=molecules,
@@ -437,13 +435,9 @@ def assess(spectrum: Spectrum, config: QualityConfig | None = None) -> QualityRe
             if huge_limit is not None and huge_limit > 0
             else 0
         ),
-        tiny_count=int(
-            np.sum(np.isfinite(sigma) & (sigma > 0) & (sigma < tiny_limit))
-        ),
+        tiny_count=int(np.sum(np.isfinite(sigma) & (sigma > 0) & (sigma < tiny_limit))),
     )
-    uncertainty_bad_fraction = (
-        float(uncertainty.bad_count / n_points) if n_points else 1.0
-    )
+    uncertainty_bad_fraction = float(uncertainty.bad_count / n_points) if n_points else 1.0
 
     # --- overall wavelength coverage ------------------------------------
     nominal_lo, nominal_hi = cfg.nominal_range
@@ -473,9 +467,7 @@ def assess(spectrum: Spectrum, config: QualityConfig | None = None) -> QualityRe
     edge_widths = edges[1:] - edges[:-1] if edges.size >= 2 else point_widths
     valid_r = (edge_widths > 0) & np.isfinite(edge_widths) & (wave > 0)
     resolving_power = (
-        float(np.median(wave[valid_r] / edge_widths[valid_r]))
-        if bool(np.any(valid_r))
-        else None
+        float(np.median(wave[valid_r] / edge_widths[valid_r])) if bool(np.any(valid_r)) else None
     )
 
     # --- per-molecule rating --------------------------------------------
@@ -543,9 +535,7 @@ def assess(spectrum: Spectrum, config: QualityConfig | None = None) -> QualityRe
         )
 
     # --- overall suitability (worst metric wins) ------------------------
-    best_band_snr = max(
-        (value for value in band_snr.values() if value is not None), default=None
-    )
+    best_band_snr = max((value for value in band_snr.values() if value is not None), default=None)
     bad_point_fraction = float(min(1.0, flagged_fraction + nan_fraction))
     metric_ratings = [
         rating_from_threshold(

@@ -31,6 +31,7 @@ pythonpath = ["src"]
 addopts = "-m 'not network'"
 markers = [
     "network: hits live network services; run with `pytest -m network`",
+    "slow: marks tests as slow; run with `pytest -m slow`",
 ]
 
 [tool.ruff]

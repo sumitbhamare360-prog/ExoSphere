@@ -121,9 +121,7 @@ def test_download_product_calibrated_1d(tmp_path, monkeypatch):
     fake = FakeObservations(manifest_path=local)
     monkeypatch.setattr(mast, "Observations", fake)
 
-    result = download_product(
-        OBS_COLUMNS["obs_id"][0], X1D_NAME, cache_dir=tmp_path
-    )
+    result = download_product(OBS_COLUMNS["obs_id"][0], X1D_NAME, cache_dir=tmp_path)
     assert result == local
     products, kwargs = fake.download_calls[0]
     assert len(products) == 1
@@ -167,10 +165,10 @@ def test_download_product_failed_manifest(monkeypatch, tmp_path):
 
 
 def test_product_info_model_and_validation():
-    info = ProductInfo(product_filename="a_x1d.fits", product_type="SCIENCE",
-                       product_subgroup="X1D")
+    info = ProductInfo(
+        product_filename="a_x1d.fits", product_type="SCIENCE", product_subgroup="X1D"
+    )
     assert info.is_calibrated_1d()
     assert not ProductInfo(
-        product_filename="a_uncal.fits", product_type="SCIENCE",
-        product_subgroup="UNCAL"
+        product_filename="a_uncal.fits", product_type="SCIENCE", product_subgroup="UNCAL"
     ).is_calibrated_1d()

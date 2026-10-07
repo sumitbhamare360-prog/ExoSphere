@@ -20,9 +20,5 @@ def test_live_get_planet_params():
 def test_live_wasp39b_prism_spectrum_is_listed():
     spectra = list_literature_spectra("WASP-39 b", spec_type="Transmission")
     assert spectra, "expected literature transmission spectra for WASP-39 b"
-    prism = [
-        s
-        for s in spectra
-        if "prism" in f"{s.instrument or ''} {s.note or ''}".lower()
-    ]
+    prism = [s for s in spectra if "prism" in f"{s.instrument or ''} {s.note or ''}".lower()]
     assert prism, "expected at least one NIRSpec PRISM transmission spectrum"

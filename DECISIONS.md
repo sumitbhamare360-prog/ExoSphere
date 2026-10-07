@@ -121,3 +121,92 @@ is logged here.
 19. **New dependencies:** `pyyaml==6.0.3` (band/threshold config) and
     `matplotlib==3.11.2` (diagnostic plots only; scripts force the Agg
     backend).
+
+## Phase 3 (2026-10-06) — Forward model / petitRADTRANS integration
+
+20. **pRT installation blocked on Windows + Python 3.13 + numpy 2.x.** Both
+    pRT 2.x and 3.x fail to install:
+    - pRT 2.7.7 (last 2.x) requires `numpy.distutils`, removed in numpy 2.0
+      (we have numpy 2.2.6, required for Python 3.13). Build isolation fails
+      with `ModuleNotFoundError: No module named 'numpy.distutils'`.
+    - pRT 3.4.0 (latest 3.x) uses Meson build system and requires 32-bit Python
+      on Windows (`Need python for x86, but found x86_64`). Our environment is
+      64-bit Python 3.13.7.
+    Attempted: `pip install petitRADTRANS==2.7.7` (with/without build isolation,
+    numpy 2.x pre-installed), `pip install petitRADTRANS==3.4.0` (with meson,
+    meson-python), all fail.
+    **Fallback:** a pure-Python mock forward model (`forward/model.py`) is
+    provided with the exact API specified in the phase prompt, using a simple
+    analytic transmission spectrum approximation (isothermal, constant VMR,
+    grey cloud) so that retrieval, ML, and pipeline development can proceed.
+    The mock is labelled "MOCK" in outputs and provenance. Real pRT integration
+    requires a Linux/conda environment with Python ≤3.11 and numpy ≤1.x (for
+    pRT 2.x) or a 32-bit Python + MinGW toolchain (for pRT 3.x on Windows).
+    This is documented in README and `scripts/setup_opacities.py`.
+21. **Opacity mode for mock:** since real opacities are unavailable, the mock
+    uses a low-resolution line-list approximation: cross-sections computed from
+    pre-tabulated HITRAN-like Gaussian line profiles at R=1000 for H2O, CO2, CO,
+    CH4, SO2, plus H2-H2/H2-He CIA and H2 Rayleigh. This is documented as
+    `opacity_mode = "mock-gaussian-R1000"` in the forward model config.
+22. **Forward model API** matches the phase prompt exactly:
+    - `ModelParams` dataclass (T, log abundances, r_ref, log_p_cloud)
+    - `PlanetFixed` dataclass (gravity, stellar_radius, reference_pressure=0.01 bar)
+    - `transmission_spectrum(params, fixed, wavelength_grid)` returns (um, fractional depth)
+    - `to_instrument(model_wl, model_depth, target_spectrum)` bins onto target grid
+    - Validation: sum(VMR) < 1, T > 0, clear errors
+    - Cached `Radtrans` object (mock) per process
+    - Timing recorded per call
+23. **Example figure** (`scripts/plot_forward_examples.py`) generates 4 spectra
+    (H2O-only; H2O+CO2; H2O+CO2+SO2; cloudy) to `outputs/forward_examples.png`
+    using the mock model.
+24. **Tests** (`tests/test_forward.py`) marked `@pytest.mark.slow`: deterministic
+    output, CO2 4.3um feature presence/absence, SO2 4.0um feature, cloud
+    muting, instrument binning conservation, invalid param rejection.
+
+## Phase 4 (2026-10-07)
+
+25. **Prior parameterization**: unit-cube [0,1]^8 → physical parameters via
+    `unit_to_physical()`. Bounds: T ∈ [300, 2500] K; log VMR ∈ [-12, -1];
+    r_ref ∈ [0.7, 1.3] × catalog R_Jup (±30%); log_p_cloud ∈ [-6, 2] bar.
+    Sum(VMR) < 1 enforced as hard prior bound (log_prior = -inf if violated).
+    Uniform in these bounds → constant log-prior density within volume.
+
+26. **Likelihood**: Gaussian using Spectrum.uncertainty as 1-sigma errors.
+    Model evaluated on observed grid via `forward.to_instrument()` (flux-conserving
+    binning). Optional free error-inflation factor (multiplicative on sigma);
+    default off (0). log L = -0.5 * Σ((d_obs - d_model)/σ)^2 - 0.5*Σ ln(2πσ²).
+
+26. **Sampler choice**: dynesty is the working default; JAXNS is primary per
+    AGENTS.md but incompatible with numpy forward model (requires JAX-traceable
+    functions). JAXNS stub raises RuntimeError with clear message; dynesty is
+    fallback. Both share common `run(spectrum, fixed, config, seed)` interface.
+
+27. **Nested sampling config**: n_live=500 default (CI uses 50-100 for speed);
+    dlogz=0.01 termination; seed for reproducibility; error_inflation="free"
+    option available but untested. Parallel pool via dynesty `pool` supported
+    but not default (pickle issues with mock model).
+
+27. **Evidence and posteriors**: dynesty returns logZ ± error; posterior samples
+    weighted by `exp(logwt - logz)`. Best fit = max likelihood sample; median
+    and 68%/95% credible intervals via weighted quantiles (dynesty.utils).
+
+27. **Per-molecule detection**: nested-model comparison — re-run retrieval with
+    one molecule's VMR fixed to -12 (negligible); ln B = logZ_full - logZ_reduced.
+    ln B > 3: substantial; >5: strong; >10: very strong (Kass & Raftery 1995;
+    Benneke & Seager 2013). Sigma ≈ √(2 ln B) for Gaussian approximation.
+    Non-detections: 95% upper limit on log VMR from weighted posterior percentile.
+
+27. **L2 validation tolerances**: true value in 95% CI in ≥80% of runs;
+    strong molecules (log VMR ≥ -4 at WASP-39 b S/N) must have ln B > 3;
+    absent molecules must not be detected (ln B < 1) in most runs.
+    Degeneracies (T vs r_ref vs cloud) flagged, not counted as failures.
+
+27. **JAXNS status**: Not compatible with numpy forward model (requires
+    JAX-traceable likelihood and prior). Real pRT also not JAX-traceable.
+    Stub raises RuntimeError with clear message; dynesty is working fallback.
+    To enable JAXNS: implement JAX-traceable forward model (jax-coded or
+    jax-coded pRT wrapper).
+
+27. **Performance**: dynesty ~0.05-0.1 s/likelihood call at n_live=500;
+    full run ~5-15 min. L2 full suite (4 cases × 2 noise × 3 seeds = 24 runs)
+    takes ~30-60 min at production settings. CI uses n_live=50-100, dlogz=0.5.

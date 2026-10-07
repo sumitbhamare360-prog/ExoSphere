@@ -39,10 +39,9 @@ def test_clean_removes_nan_flagged_and_spike_with_original_indices():
     assert log.n_input == n
     assert log.n_output == n - len(log.removed)
     assert len(cleaned.wavelength) == log.n_output
-    assert all(
-        a < b
-        for a, b in zip(cleaned.wavelength, cleaned.wavelength[1:], strict=False)
-    ), "cleaned wavelengths must stay strictly ascending"
+    assert all(a < b for a, b in zip(cleaned.wavelength, cleaned.wavelength[1:], strict=False)), (
+        "cleaned wavelengths must stay strictly ascending"
+    )
 
 
 def test_clean_does_not_mutate_input():
@@ -73,9 +72,7 @@ def test_rebin_weighted_mean_and_error_propagation_analytic():
     sigma = np.array([1e-5, 2e-5, 4e-5, 5e-5, 1e-5, 2e-5, 4e-5, 5e-5])
     spectrum = make_synthetic_spectrum(wave, depth, sigma)
 
-    cleaned, log = clean(
-        spectrum, CleanOptions(sigma_clip=False, rebin="count", bin_count=2)
-    )
+    cleaned, log = clean(spectrum, CleanOptions(sigma_clip=False, rebin="count", bin_count=2))
     assert log.rebin is not None
     groups = {g.output_index: g.input_indices for g in log.rebin.groups}
     assert len(groups) == 2
@@ -84,12 +81,8 @@ def test_rebin_weighted_mean_and_error_propagation_analytic():
         weights = 1.0 / np.square(sigma[input_indices])
         expected_depth = float(np.sum(weights * depth[input_indices]) / np.sum(weights))
         expected_sigma = float(1.0 / np.sqrt(np.sum(weights)))
-        assert cleaned.transmission[output_index] == pytest.approx(
-            expected_depth, rel=1e-12
-        )
-        assert cleaned.uncertainty[output_index] == pytest.approx(
-            expected_sigma, rel=1e-12
-        )
+        assert cleaned.transmission[output_index] == pytest.approx(expected_depth, rel=1e-12)
+        assert cleaned.uncertainty[output_index] == pytest.approx(expected_sigma, rel=1e-12)
         # uncertainty of the mean is always smaller than the best single point
         assert cleaned.uncertainty[output_index] <= min(sigma[input_indices]) + 1e-15
 
@@ -97,9 +90,7 @@ def test_rebin_weighted_mean_and_error_propagation_analytic():
 def test_rebin_count_produces_correct_edges_and_centers():
     wave, depth, sigma = make_feature_spectrum(n_points=200)
     spectrum = make_synthetic_spectrum(wave, depth, sigma)
-    cleaned, log = clean(
-        spectrum, CleanOptions(sigma_clip=False, rebin="count", bin_count=40)
-    )
+    cleaned, log = clean(spectrum, CleanOptions(sigma_clip=False, rebin="count", bin_count=40))
     assert log.rebin is not None and log.rebin.n_output == 40
     assert len(cleaned.wavelength_bin_edges) == len(cleaned.wavelength) + 1
     edges = np.asarray(cleaned.wavelength_bin_edges)
@@ -160,9 +151,7 @@ def test_bad_uncertainties_are_dropped():
 def test_clean_raises_when_everything_is_removed():
     n = 30
     wave = np.linspace(0.6, 5.3, n)
-    spectrum = make_synthetic_spectrum(
-        wave, np.full(n, np.nan), np.full(n, 2e-5)
-    )
+    spectrum = make_synthetic_spectrum(wave, np.full(n, np.nan), np.full(n, 2e-5))
     with pytest.raises(ValueError, match="removed every point"):
         clean(spectrum)
 

@@ -93,9 +93,7 @@ def default_cache_dir() -> Path:
     return load_config().data_cache_dir / "exoarchive"
 
 
-def tap_query_csv(
-    query: str, *, cache_dir: Path | None = None, refresh: bool = False
-) -> str:
+def tap_query_csv(query: str, *, cache_dir: Path | None = None, refresh: bool = False) -> str:
     """Run an ADQL query through the TAP sync endpoint, caching the CSV reply."""
     directory = Path(cache_dir) if cache_dir is not None else default_cache_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -173,8 +171,7 @@ def get_planet_params(
 ) -> PlanetParams:
     """Fetch planet and host-star parameters for ``name`` (exact archive name)."""
     query = (
-        f"SELECT {', '.join(_PSCOMPPARS_COLUMNS)} FROM pscomppars "
-        f"WHERE pl_name = '{_escape(name)}'"
+        f"SELECT {', '.join(_PSCOMPPARS_COLUMNS)} FROM pscomppars WHERE pl_name = '{_escape(name)}'"
     )
     text = tap_query_csv(query, cache_dir=cache_dir, refresh=refresh)
     frame = _frame(text)
@@ -235,10 +232,7 @@ def list_literature_spectra(
     refresh: bool = False,
 ) -> list[LiteratureSpectrum]:
     """List literature spectra available for ``name`` (optionally one type)."""
-    query = (
-        f"SELECT {', '.join(_SPECTRA_COLUMNS)} FROM spectra "
-        f"WHERE pl_name = '{_escape(name)}'"
-    )
+    query = f"SELECT {', '.join(_SPECTRA_COLUMNS)} FROM spectra WHERE pl_name = '{_escape(name)}'"
     text = tap_query_csv(query, cache_dir=cache_dir, refresh=refresh)
     frame = _frame(text)
     spectra: list[LiteratureSpectrum] = []
