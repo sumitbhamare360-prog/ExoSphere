@@ -1,0 +1,37 @@
+{
+  "_comment": "MOCK DATA for UI development and tests only. Values are illustrative and NOT measured. Do not cite.",
+  "analysis_id": "MOCK-WASP39B",
+  "planet_name": "WASP-39 b",
+  "parameters": [
+    {"name": "planet_radius", "label": "Planet radius", "value": 1.27, "unit": "R_Jup", "source": "inferred", "ci_68": [1.22, 1.32], "note": "retrieval posterior median"},
+    {"name": "planet_mass", "label": "Planet mass", "value": 0.28, "unit": "M_Jup", "source": "measured", "ci_68": null, "note": "catalog pl_bmasse / 317.828"},
+    {"name": "surface_gravity", "label": "Surface gravity", "value": 4.3, "unit": "m/s^2", "source": "derived", "ci_68": null, "note": "g = G*M/R^2 from catalog mass and radius"},
+    {"name": "stellar_radius", "label": "Stellar radius", "value": 0.93, "unit": "R_Sun", "source": "measured", "ci_68": null, "note": "catalog st_rad"},
+    {"name": "stellar_teff", "label": "Stellar effective temperature", "value": 5400.0, "unit": "K", "source": "measured", "ci_68": null, "note": "catalog st_teff"},
+    {"name": "semi_major_axis", "label": "Semi-major axis", "value": 0.0486, "unit": "AU", "source": "measured", "ci_68": null, "note": "catalog pl_orbsmax"},
+    {"name": "semi_major_axis_stellar_radii", "label": "Semi-major axis", "value": 11.4, "unit": "R_*", "source": "measured", "ci_68": null, "note": "catalog pl_ratdor (a/R*)"},
+    {"name": "orbital_period", "label": "Orbital period", "value": 4.055, "unit": "days", "source": "measured", "ci_68": null, "note": "catalog pl_orbper"},
+    {"name": "inclination", "label": "Orbital inclination", "value": 87.83, "unit": "deg", "source": "measured", "ci_68": null, "note": "catalog pl_orbincl"},
+    {"name": "eccentricity", "label": "Orbital eccentricity", "value": 0.0, "unit": "dimensionless", "source": "assumed", "ci_68": null, "note": "circular default 0.0 (no catalog value)"},
+    {"name": "equilibrium_temperature", "label": "Equilibrium temperature", "value": 1166.0, "unit": "K", "source": "measured", "ci_68": null, "note": "catalog pl_eqt"},
+    {"name": "atmosphere_temperature", "label": "Atmosphere temperature", "value": 1170.0, "unit": "K", "source": "inferred", "ci_68": [1080.0, 1260.0], "note": "retrieval posterior median"},
+    {"name": "cloud_top_pressure", "label": "Cloud-top pressure", "value": -1.0, "unit": "log10(bar)", "source": "inferred", "ci_68": [-1.5, -0.5], "constrained": true, "note": "retrieval posterior median (constrained)"},
+    {"name": "mean_molecular_weight", "label": "Mean molecular weight", "value": 2.35, "unit": "g/mol", "source": "derived", "ci_68": null, "note": "from retrieval best-fit composition (H2/He background)"},
+    {"name": "scale_height", "label": "Atmospheric scale height", "value": 955.0, "unit": "km", "source": "derived", "ci_68": null, "note": "H = kB*T/(mu*mH*g)"},
+    {"name": "transit_depth_observed", "label": "Observed transit depth", "value": 0.0214, "unit": "fractional (Rp/Rs)^2", "source": "measured", "ci_68": null, "note": "median of observed transmission spectrum"},
+    {"name": "transit_depth_model", "label": "Model transit depth", "value": 0.019693, "unit": "fractional (Rp/Rs)^2", "source": "derived", "ci_68": null, "note": "(Rp/Rs)^2 from twin planet/star radii"}
+  ],
+  "molecules": [
+    {"molecule": "H2O", "contribution_fraction": 0.62, "in_band": true, "note": "model-derived signal fraction in this molecule's band windows"},
+    {"molecule": "CO2", "contribution_fraction": 0.55, "in_band": true, "note": "model-derived signal fraction in this molecule's band windows"},
+    {"molecule": "CO", "contribution_fraction": 0.08, "in_band": true, "note": "model-derived signal fraction in this molecule's band windows"},
+    {"molecule": "CH4", "contribution_fraction": 0.31, "in_band": true, "note": "model-derived signal fraction in this molecule's band windows"},
+    {"molecule": "SO2", "contribution_fraction": 0.22, "in_band": true, "note": "model-derived signal fraction in this molecule's band windows"}
+  ],
+  "meta": {
+    "scale_height_formula": "H = kB*T/(mu*mH*g)",
+    "bands_version": "molecule-bands-1.0.0",
+    "cloud_constrained": true,
+    "has_retrieval": true
+  }
+}

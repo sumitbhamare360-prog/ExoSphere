@@ -163,3 +163,63 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 ### Next step
 
 **Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).
+
+## Phase 8 --- 3D scientific digital twin (done)
+
+### What was built
+
+Backend:
+- `src/exosphere/twin.py` --- pure mappings (planet/star params, `H = kB*T/(mu*mH*g)`,
+  `(Rp/Rs)^2`, `a/Rs` from period+mass or `pl_ratdor`, per-molecule in-band signal
+  contributions) + `build_twin_parameters()` with `measured|inferred|derived|assumed`
+  source tags and assumed fallbacks (logged in notes). LRU cache (128).
+- `Posterior.summary_json` persisted by the pipeline; `GET /analyses/{id}/twin` (404 without
+  retrieval), `GET /config/molecule-bands`.
+- Schemas: `TwinParameter` (+68% CI, `constrained` for clouds), `TwinMoleculeContribution`,
+  `TwinParametersResponse`.
+
+Frontend (`web/`, previously unbuilt):
+- `TwinCanvas` (three.js: star, orbit line, planet, uniform atmosphere shell, cloud deck,
+  WebGL fallback message) + `OrbitSystem/StarBody/PlanetBody/AtmosphereShell/CloudLayer`,
+  pure mapping module `lib/twinGeometry.ts`, `TwinView` (play/pause, speed, orbit/transit
+  camera presets, phase-synced mini light curve, molecule highlight from the shared zustand
+  store), `TwinPanel` (source badges, model-derived contributions, legend + not-a-photograph
+  disclaimer), `TwinPage` (`/twin`, `/twin/demo`, `/twin/:analysisId`) with WASP-39 b /
+  WASP-121 b mock datasets (labelled "mock data").
+- Minimal repairs to pre-existing breakage blocking the build: `api.ts` (stray `},`, missing
+  `>` in `searchPlanets`, duplicate `seed`/`version` keys, unused import), `SpectrumViewer`
+  rewritten as a working minimal SVG plot (zoom/credible-band deferred), `useExoStore`
+  shadowed var, `AnalyzePage` unused var, `@tailwindcss/postcss` + `react-router-dom`
+  dependencies, `@theme` typos, `@apply` of custom classes inlined for Tailwind v4.
+
+### Tests (run: `pytest`, `ruff check .`, `npm test`, `npm run lint`, `npm run build`)
+
+- Backend: **130 passed** (incl. 15 in `tests/test_twin.py`), ruff clean.
+- Frontend: **33 passed** (`twinGeometry` math incl. phase-0-at-transit, store selection sync,
+  no-texture/surface scan with negation-aware disclaimer lines, mock-dataset contract for
+  both demo planets). `oxlint`: 0 errors (warnings pre-existing). `tsc -b && vite build` passes.
+- Caught by the new tests: `orbitPoint` rotation-sign bug (transit rendered at -z); fixed to +90 deg.
+
+### Files touched (Phase 8)
+
+`src/exosphere/twin.py`, `src/exosphere/api/{schemas.py,app.py,db.py}`, `src/exosphere/pipeline.py`,
+`config/molecule_bands.yaml` (read), `tests/test_twin.py`,
+`web/src/{lib/twinGeometry.ts,lib/api.ts,components/twin/*,pages/TwinPage.tsx,mock/*.json,
+store/useExoStore.ts,components/spectrum/SpectrumViewer.tsx,components/Layout.tsx}`,
+`web/{package.json,postcss.config.js,tsconfig.app.json,index.css}`,
+`web/src/{lib/twinGeometry.test.ts,store/twinSelection.test.ts,
+components/twin/noForbiddenVisuals.test.ts,mock/twinMocks.test.ts}`,
+deleted dead root scratch (`fix_line.py`, `fix_line57.py`, `phase6_update.py`, `update_progress.py`;
+all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRESS.md`.
+
+### Open issues
+
+- Twin verified headlessly (contract + geometry tests, production build); no in-browser
+  WebGL screenshot check (no browser harness in this environment).
+- `SpectrumViewer` is a minimal plot; interactive zoom + model credible band deferred.
+- `oxlint` warnings (~20, pre-existing unused vars) and 930 kB `TwinCanvas` chunk warning remain.
+- Retrieval summary for old analyses needs re-run (column added in Phase 8).
+
+### Next step
+
+**Phase 9** (see `PHASE_PROMPTS.md`): validation levels L1/L2/L3 test suite.

@@ -406,17 +406,43 @@ class Pipeline:
                 session.add(db_result)
 
     async def _save_retrieval_result(self, result: Any):
+        import hashlib
+
+        from exosphere.core.config import load_config
+
+        config = load_config()
+        output_path = config.data_cache_dir / "posteriors" / f"{self.analysis_id}.npz"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        result.save_npz(output_path)
+        file_hash = hashlib.sha256(output_path.read_bytes()).hexdigest()
+        param_names = list(result.param_names)
+        summary = {
+            "median": {
+                name: float(value)
+                for name, value in zip(param_names, result.median, strict=True)
+            },
+            "ci_68": {
+                name: [float(lo), float(hi)]
+                for name, (lo, hi) in zip(param_names, result.ci_68, strict=True)
+            },
+            "best_fit": {
+                name: float(value)
+                for name, value in zip(param_names, result.best_fit, strict=True)
+            },
+            "param_names": param_names,
+        }
         async with async_session_maker() as session:
             async with session.begin():
                 posterior = Posterior(
                     analysis_id=self.analysis_id,
-                    file_path="",
-                    file_hash="",
+                    file_path=str(output_path),
+                    file_hash=file_hash,
                     logz=result.logz,
                     logz_err=result.logz_err,
                     n_samples=result.n_samples,
                     n_live=self.options.n_live,
                     dlogz=self.options.dlogz,
+                    summary_json=summary,
                 )
                 session.add(posterior)
 

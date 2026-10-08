@@ -259,3 +259,36 @@ is logged here.
 32. **Tests**: label function unit test; dataset generation seeded/reproducible
     (small N=100); model forward pass shapes; predict() output schema +
     labelling; tiny overfit test (model fits 50 samples to near-zero loss).
+
+## Phase 8 (2026-10-08) — 3D scientific digital twin
+
+33. **Twin phase convention**: orbital phase 0 = transit center at +z (between star and
+    default/transit camera); implemented in `orbitPoint` via +90 deg rotation. A sign bug
+    (-90 deg, transit at -z) was caught by the new `twinGeometry` tests and fixed.
+
+34. **Twin cloud visual**: deck altitude fraction = (2 - logP)/8 of the displayed shell
+    (deep = surface/clear, high = top), opacity = 0.15 + 0.55 * fraction; solid only when
+    the retrieval CI width < 2 dex (`constrained`), else hatched + "uncertain" label.
+
+35. **Twin atmosphere shell**: outer edge at 4 scale heights (e^-4 ~ 2% residual pressure),
+    thickness visually exaggerated x25 (labelled "not to scale"); planet/star/orbit geometry
+    itself uses true Rp/Rs and a/Rs ratios. Tidal locking noted as an assumption.
+
+36. **Molecule contribution metric** (model-derived, NOT a detection): per-molecule
+    in-band share = sum|d_full - d_noM| / sum|d_full - median(d_full)| over that molecule's
+    band windows from `config/molecule_bands.yaml`, clipped to [0, 1].
+
+37. **Twin demo data**: `web/src/mock/wasp39b-twin.json`, `wasp121b-twin.json` are illustrative
+    MOCK datasets for UI dev/tests, always badged "mock data" in the UI. Never cite as results.
+
+38. **SpectrumViewer repair**: the Phase 7 file never compiled (missing names, unclosed loop,
+    duplicate declarations); rewrote it as a minimal working SVG plot reusing the same props
+    interface. Interactive zoom + credible band remain deferred Phase 7 follow-up work.
+
+39. **Dead scratch cleanup**: deleted `fix_line.py`, `fix_line57.py`, `phase6_update.py`,
+    `update_progress.py` from the repo root (all broken/syntactically invalid, outside the
+    AGENTS.md layout, broke the `ruff check .` gate). Logged here per protocol.
+
+40. **Missing frontend deps**: added `react-router-dom` (imported but never installed) and
+    `@tailwindcss/postcss` (Tailwind v4 requires the separate PostCSS package); fixed
+    `@theme` single-dash typos and inlined `@apply` of custom classes (unsupported in v4).

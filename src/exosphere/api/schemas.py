@@ -361,6 +361,55 @@ class HealthResponse(BaseModel):
     database: str
 
 
+class TwinParameter(BaseModel):
+    """One twin parameter with its provenance source tag."""
+
+    name: str = Field(..., description="Machine-readable parameter name")
+    label: str = Field(..., description="Human-readable label")
+    value: float | None = Field(..., description="Parameter value (None when unavailable)")
+    unit: str = Field(..., description="Explicit unit string")
+    source: Literal["measured", "inferred", "derived", "assumed"] = Field(
+        ..., description="Provenance source tag"
+    )
+    ci_68: list[float] | None = Field(
+        default=None, description="68% credible interval [lo, hi] (inferred params only)"
+    )
+    constrained: bool | None = Field(
+        default=None,
+        description="Whether an inferred parameter is constrained (cloud-top pressure)",
+    )
+    note: str | None = Field(default=None, description="How the value was obtained")
+
+
+class TwinMoleculeContribution(BaseModel):
+    """Model-derived share of one molecule's in-band spectral signal."""
+
+    molecule: str
+    contribution_fraction: float = Field(
+        ..., ge=0.0, le=1.0, description="Model-derived signal fraction in band windows"
+    )
+    in_band: bool = Field(..., description="Whether any band window overlaps the spectrum")
+    note: str = Field(..., description="How the value was obtained")
+
+
+class TwinParametersResponse(BaseModel):
+    """Scientific digital twin parameters for one analysis."""
+
+    analysis_id: str
+    planet_name: str
+    parameters: list[TwinParameter]
+    molecules: list[TwinMoleculeContribution]
+    meta: dict = Field(default_factory=dict)
+
+
+class MoleculeBandsResponse(BaseModel):
+    """Molecule absorption band windows + quality config version."""
+
+    version: str
+    wavelength_range_um: list[float]
+    molecules: dict[str, list[list[float]]]
+
+
 # --- Helper to create analysis_id ---
 def generate_analysis_id() -> str:
     """Generate next analysis ID in EXO-XXXXXX format."""

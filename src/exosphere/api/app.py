@@ -34,6 +34,7 @@ from exosphere.api.schemas import (
     DetectionResultsResponse,
     HealthResponse,
     MLScoresResponse,
+    MoleculeBandsResponse,
     ObservationSummary,
     PaginatedAnalyses,
     PlanetDetail,
@@ -43,6 +44,7 @@ from exosphere.api.schemas import (
     QualityReportResponse,
     RetrievalSummary,
     SpectrumResponse,
+    TwinParametersResponse,
 )
 from exosphere.pipeline import PipelineOptions
 
@@ -698,6 +700,103 @@ async def get_provenance(
         timestamp=analysis.created_at.isoformat() + "Z",
         result_reference=None,
     )
+
+
+@app.get("/config/molecule-bands", response_model=MoleculeBandsResponse)
+async def get_molecule_bands():
+    """Molecule absorption band windows + quality config version."""
+    from exosphere.quality.assess import load_quality_config
+
+    cfg = load_quality_config()
+    return MoleculeBandsResponse(
+        version=cfg.version,
+        wavelength_range_um=[cfg.wavelength_range_um[0], cfg.wavelength_range_um[1]],
+        molecules={mol: [[lo, hi] for lo, hi in wins] for mol, wins in cfg.molecule_bands.items()},
+    )
+
+
+@app.get("/analyses/{analysis_id}/twin", response_model=TwinParametersResponse)
+async def get_twin_parameters(
+    analysis_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Scientific digital twin parameters with provenance source tags.
+
+    Planet/star/orbit values come from the catalog (measured), the atmosphere
+    temperature, cloud-top pressure and radius from the retrieval posterior
+    median when a retrieval summary was stored (inferred), quantities computed
+    from those (derived), and documented defaults otherwise (assumed).
+    """
+    from pathlib import Path
+
+    from sqlalchemy.orm import selectinload
+
+    from exosphere.api.db import Posterior
+    from exosphere.core.spectrum import Spectrum
+    from exosphere.twin import build_twin_parameters
+
+    result = await db.execute(
+        select(Analysis)
+        .options(
+            selectinload(Analysis.planet),
+            selectinload(Analysis.observation),
+            selectinload(Analysis.spectrum_file),
+        )
+        .where(Analysis.analysis_id == analysis_id)
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    planet = analysis.planet
+    catalog = {
+        "pl_rade": planet.pl_rade if planet else None,
+        "pl_bmasse": planet.pl_bmasse if planet else None,
+        "st_rad": planet.st_rad if planet else None,
+        "st_teff": planet.st_teff if planet else None,
+        "pl_orbsmax": planet.pl_orbsmax if planet else None,
+        "pl_orbper": planet.pl_orbper if planet else None,
+        "pl_orbincl": planet.pl_orbincl if planet else None,
+        "pl_orbeccen": planet.pl_orbeccen if planet else None,
+        "pl_eqt": planet.pl_eqt if planet else None,
+        "pl_ratdor": planet.pl_ratdor if planet else None,
+        "surface_gravity_m_s2": planet.surface_gravity_m_s2 if planet else None,
+    }
+
+    retrieval: dict | None = None
+    post_result = await db.execute(
+        select(Posterior).where(Posterior.analysis_id == analysis.id)
+    )
+    posterior = post_result.scalars().first()
+    if posterior is not None and posterior.summary_json:
+        summary = posterior.summary_json
+        retrieval = {
+            "median": summary.get("median", {}),
+            "ci_68": summary.get("ci_68", {}),
+            "best_fit": summary.get("best_fit", {}),
+        }
+
+    spectrum: dict | None = None
+    spec_path: str | None = None
+    if analysis.spectrum_file is not None:
+        spec_path = analysis.spectrum_file.file_path
+    elif analysis.observation is not None and analysis.observation.spectrum_file_path:
+        spec_path = analysis.observation.spectrum_file_path
+    if spec_path and Path(spec_path).exists():
+        spec = Spectrum.load(spec_path)
+        spectrum = {
+            "wavelength": list(spec.wavelength),
+            "transmission": list(spec.transmission),
+        }
+
+    twin = build_twin_parameters(
+        analysis_id=analysis_id,
+        planet_name=planet.name if planet else "unknown",
+        catalog=catalog,
+        retrieval=retrieval,
+        spectrum=spectrum,
+    )
+    return TwinParametersResponse(**twin)
 
 
 @app.delete("/analyses/{analysis_id}")

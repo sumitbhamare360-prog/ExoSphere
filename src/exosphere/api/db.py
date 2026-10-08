@@ -245,6 +245,11 @@ class Posterior(Base):
     n_samples: Mapped[int | None] = mapped_column(nullable=True)
     n_live: Mapped[int | None] = mapped_column(nullable=True)
     dlogz: Mapped[float | None] = mapped_column(nullable=True)
+    # Retrieval summary: median / ci_68 / best_fit per parameter + param_names
+    summary_json: Mapped[dict | None] = mapped_column(
+        SQLiteJSON if "sqlite" in settings.database_url else JSON,
+        nullable=True,
+    )
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
