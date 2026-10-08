@@ -144,19 +144,22 @@ def compute_bayes_factor(
         import dynesty
 
         ndim = 8
-        reduced_sampler = dynesty.NestedSampler(
+        reduced_sampler = dynesty.DynamicNestedSampler(
             make_reduced_log_likelihood(
                 spectrum, fixed, 1.27, DEFAULT_PRIOR_CONFIG, 0.0, mol_idx, -12.0
             ),
             reduced_prior,
             ndim,
             nlive=sampler_config.n_live,
-            seed=seed,
+            sample=sampler_config.sample,
+            rstate=np.random.default_rng(seed),
         )
 
         reduced_sampler.run_nested(
-            dlogz=sampler_config.dlogz,
-            maxiter=sampler_config.max_iter,
+            maxiter_init=sampler_config.max_iter,
+            maxbatch=0,
+            dlogz_init=sampler_config.dlogz,
+            maxcall=sampler_config.maxcall,
             print_progress=False,
         )
 

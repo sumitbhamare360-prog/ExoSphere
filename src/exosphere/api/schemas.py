@@ -410,6 +410,26 @@ class MoleculeBandsResponse(BaseModel):
     molecules: dict[str, list[list[float]]]
 
 
+class ReportRequest(BaseModel):
+    """Request a scientific report build (HTML is always available)."""
+
+    format: Literal["html", "pdf"] = Field(
+        default="html",
+        description="Report format; 'pdf' needs WeasyPrint system libraries",
+    )
+
+
+class ReportResponse(BaseModel):
+    """Metadata for a built scientific report."""
+
+    analysis_id: str
+    format: str
+    file_path: str
+    file_hash: str
+    report_version: str
+    created_at: datetime | None = None
+
+
 # --- Helper to create analysis_id ---
 def generate_analysis_id() -> str:
     """Generate next analysis ID in EXO-XXXXXX format."""

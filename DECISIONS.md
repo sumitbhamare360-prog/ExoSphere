@@ -292,3 +292,56 @@ is logged here.
 40. **Missing frontend deps**: added `react-router-dom` (imported but never installed) and
     `@tailwindcss/postcss` (Tailwind v4 requires the separate PostCSS package); fixed
     `@theme` single-dash typos and inlined `@apply` of custom classes (unsupported in v4).
+
+## Phase 9a (2026-10-08) — Scientific report generator
+
+41. **Interpretation thresholds (fixed):** supported = ln B >= 5 with GOOD/LIMITED data
+    quality; weakly supported = 3 <= ln B < 5; otherwise not constrained (ln B < 3,
+    missing Bayes factor, or upper-limit only). POOR data quality overrides any ln B
+    to "not constrained" (AGENTS.md rule 3). ML candidate scores never drive support
+    classes; only retrieval-based nested-model comparison does.
+
+42. **PDF export ships HTML-only in this environment.** WeasyPrint 70.0 installs via pip
+    but cannot render on this Windows box (missing Pango system libraries
+    `libgobject-2.0-0`, etc.). `build_report(format="pdf")` raises PDFUnavailableError
+    (API: HTTP 501) with that explanation. `jinja2==3.1.6` pinned; `weasyprint` kept
+    out of `pyproject.toml` since it cannot function here.
+
+43. **Pipeline repairs required for any end-to-end run (all pre-existing Phase 6 bugs,
+    none exercised before: no retrieval/pipeline/API tests existed):**
+    - `run_dynesty`/nested runs used dynesty 2.x kwargs (`nlive=`, `seed=`); installed
+      dynesty 3.1.0 needs `DynamicNestedSampler` + `nlive=` there, `maxiter_init` /
+      `maxbatch=0` (static run) / `dlogz_init` / `maxcall` in `run_nested`.
+    - `Pipeline._run_retrieval` dropped its SamplerConfig and called `run_dynesty`
+      with 1 arg (needs spectrum, fixed, config, seed); `_run_detection` likewise.
+      Both now thread the pipeline options/seed through; `SamplerConfig` and
+      `PipelineOptions` gained `maxcall`.
+    - `Pipeline._save_cleaned_spectrum` passed a nonexistent `analysis_id` kwarg to
+      `SpectrumFile`; now links via the analysis row's `observation_id` (plus the
+      existing `spectrum_file_id` pointer).
+    - `Pipeline._load_planet_params` hit the network archive; now reads the stored
+      Planet catalog row first, archive only as fallback.
+    - `RetrievalResult.load_npz` typo `data.ci_95` -> `data["ci_95"]` (95% intervals
+      were unloadable); `credible_band_spectrum` gained a `seed` for determinism.
+    - `Pipeline._run_preprocess` now persists the PreprocessLog to
+      `data_cache/preprocess_logs/<id>.json` (previously discarded); the report
+      shows "not run" for older analyses.
+
+44. **Forward-model speed (no science change).** The mock `_compute_transmission_radius`
+    looped 29,700 wavelengths with per-point `searchsorted` (~0.18 s/call, making any
+    retrieval infeasible). Rewrote as a vectorized first-crossing search; verified
+    bitwise-identical output (max abs diff 0.0 over 6 random atmospheres) and ~60x
+    faster. Same math, same branch semantics.
+
+45. **dynesty 3.x static-run settings.** `DynamicNestedSampler` with `maxbatch=0`
+    (baseline run only), `maxiter_init`/`maxcall` caps, `dlogz_init` from options.
+    Real WASP-39 b run uses CI-grade settings (n_live=75, dlogz=0.5, maxcall=40000,
+    seed=42); nested detection models reuse the same config.
+
+46. **Slice sampling (`sample="rslice"`) as the dynesty proposal default.**
+    Uniform multi-ellipsoid proposals (`auto`) suffer acceptance collapse on the
+    vague 8-D priors (efficiency fell below 8% and kept dropping; a run stalled
+    with dlogz still > 8000 after ~9000 calls). `rslice` draws from live points
+    (~4 likelihood calls per iteration, deterministic given the seed) and
+    progresses steadily. Still dynesty nested sampling; `SamplerConfig.sample`
+    can select `auto` if ever needed.

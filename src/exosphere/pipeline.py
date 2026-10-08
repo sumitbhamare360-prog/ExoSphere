@@ -33,10 +33,7 @@ from exosphere.forward.model import PlanetFixed
 from exosphere.ml.infer import MLClassifier
 from exosphere.preprocess.clean import CleanOptions, clean
 from exosphere.quality.assess import assess
-from exosphere.retrieval.detection import (
-    compute_all_bayes_factors,
-    detection_summary,
-)
+from exosphere.retrieval.detection import detection_summary
 from exosphere.retrieval.samplers import SamplerConfig, run_dynesty
 
 
@@ -53,6 +50,7 @@ class PipelineOptions:
     n_live: int = 500
     dlogz: float = 0.01
     max_iter: int = 50000
+    maxcall: int | None = None
     seed: int = 42
     error_inflation: float = 0.0
     error_inflation_free: bool = False
@@ -76,6 +74,8 @@ class PipelineState:
     ml_result: Any | None = None
     retrieval_result: Any | None = None
     detection_results: dict | None = None
+    fixed: Any | None = None
+    sampler_config: Any | None = None
 
 
 class ProgressCallback:
@@ -170,7 +170,7 @@ class Pipeline:
             self._update_progress("loading", 0.05, "Loading planet parameters")
             await self._update_db_status("running", "loading", 0.05, "Loading planet parameters")
 
-            await self._load_planet_params(planet_name)
+            self.state.fixed = await self._load_planet_params(planet_name)
 
             # Stage 2: Load spectrum
             self._update_progress("loading", 0.1, "Loading spectrum")
@@ -246,11 +246,33 @@ class Pipeline:
         self.state.stage_times[stage] = elapsed
 
     async def _load_planet_params(self, planet_name: str):
-        """Load planet parameters from NASA Exoplanet Archive."""
-        planet_params = get_planet_params(planet_name)
+        """Load fixed planet parameters, preferring the stored catalog row.
+
+        Falls back to the NASA Exoplanet Archive (network) only when the
+        database row is missing or lacks gravity/stellar radius.
+        """
+        from sqlalchemy.orm import selectinload
+
+        gravity: float | None = None
+        stellar_radius: float | None = None
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Analysis)
+                .options(selectinload(Analysis.planet))
+                .where(Analysis.analysis_id == self.analysis_id)
+            )
+            analysis = result.scalar_one_or_none()
+            planet = analysis.planet if analysis is not None else None
+            if planet is not None:
+                gravity = planet.surface_gravity_m_s2
+                stellar_radius = planet.st_rad
+        if gravity is None or stellar_radius is None:
+            planet_params = get_planet_params(planet_name)
+            gravity = planet_params.surface_gravity_m_s2
+            stellar_radius = planet_params.stellar_radius_rsun
         return PlanetFixed(
-            gravity_m_s2=planet_params.surface_gravity_m_s2,
-            stellar_radius_rsun=planet_params.stellar_radius_rsun,
+            gravity_m_s2=float(gravity),
+            stellar_radius_rsun=float(stellar_radius),
             reference_pressure_bar=0.01,
         )
 
@@ -278,7 +300,7 @@ class Pipeline:
         return assess(spectrum)
 
     async def _run_preprocess(self, spectrum: Spectrum) -> Spectrum:
-        """Run preprocessing."""
+        """Run preprocessing and persist the PreprocessLog for the report."""
         options = CleanOptions(
             drop_nan=True,
             drop_flagged=True,
@@ -288,6 +310,10 @@ class Pipeline:
             rebin=None,
         )
         cleaned, log = clean(spectrum, options)
+        config = load_config()
+        log_path = config.data_cache_dir / "preprocess_logs" / f"{self.analysis_id}.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(log.to_json(), encoding="utf-8")
         return cleaned
 
     async def _run_ml_inference(self, spectrum: Any) -> Any:
@@ -311,7 +337,7 @@ class Pipeline:
                     float(self.state.spectrum.wavelength[-1]),
                 ),
                 grid_match=True,
-                warnings=["No trained model found"],
+                warnings=["No trained model available; scores are all-zero placeholders"],
             )
 
         # Load classifier
@@ -323,34 +349,36 @@ class Pipeline:
         spectrum: Spectrum,
         fixed_params: dict | None = None,
     ) -> Any:
-        """Run Bayesian retrieval."""
-
-        SamplerConfig(
+        """Run Bayesian retrieval with the pipeline sampler settings."""
+        config = SamplerConfig(
             n_live=self.options.n_live,
             dlogz=self.options.dlogz,
             max_iter=self.options.max_iter,
+            maxcall=self.options.maxcall,
             seed=self.options.seed,
+            error_inflation=self.options.error_inflation,
         )
-
+        self.state.sampler_config = config
         result = await asyncio.to_thread(
             run_dynesty,
             self.state.cleaned_spectrum,
-            # Fixed params would be passed here
+            self.state.fixed,
+            config,
+            self.options.seed,
         )
         return result
 
     async def _run_detection(self) -> dict:
-        """Run per-molecule detection."""
+        """Run per-molecule detection with the same fixed/config/seed as retrieval."""
         if not self.state.retrieval_result:
             return {}
 
-        compute_all_bayes_factors(
-            self.state.retrieval_result,
-            self.state.cleaned_spectrum,
-        )
         return detection_summary(
             self.state.retrieval_result,
             self.state.cleaned_spectrum,
+            self.state.fixed,
+            self.state.sampler_config,
+            self.options.seed,
         )
 
     async def _save_quality_report(self, report):
@@ -374,8 +402,12 @@ class Pipeline:
 
         async with async_session_maker() as session:
             async with session.begin():
+                result = await session.execute(
+                    select(Analysis).where(Analysis.analysis_id == self.analysis_id)
+                )
+                analysis = result.scalar_one_or_none()
                 spectrum_file = SpectrumFile(
-                    analysis_id=self.analysis_id,
+                    observation_id=analysis.observation_id if analysis else None,
                     file_path=str(output_path),
                     file_hash=hashlib.sha256(open(output_path, "rb").read()).hexdigest(),
                     wavelength_min_um=float(min(spectrum.wavelength)),
@@ -386,10 +418,6 @@ class Pipeline:
                 await session.flush()
 
                 # Update analysis with spectrum file ID
-                result = await session.execute(
-                    select(Analysis).where(Analysis.analysis_id == self.analysis_id)
-                )
-                analysis = result.scalar_one_or_none()
                 if analysis:
                     analysis.spectrum_file_id = spectrum_file.id
 

@@ -42,6 +42,8 @@ from exosphere.api.schemas import (
     PosteriorSamplesResponse,
     ProvenanceResponse,
     QualityReportResponse,
+    ReportRequest,
+    ReportResponse,
     RetrievalSummary,
     SpectrumResponse,
     TwinParametersResponse,
@@ -797,6 +799,93 @@ async def get_twin_parameters(
         spectrum=spectrum,
     )
     return TwinParametersResponse(**twin)
+
+
+@app.post("/analyses/{analysis_id}/report", response_model=ReportResponse)
+async def create_report(
+    analysis_id: str,
+    body: ReportRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Build the scientific report from stored products (HTML; PDF if available)."""
+    from exosphere.api.db import Report
+    from exosphere.report.build import (
+        REPORT_VERSION,
+        PDFUnavailableError,
+        ReportNotFoundError,
+        ReportWordingError,
+        build_report_async,
+    )
+
+    try:
+        await build_report_async(analysis_id, format=body.format)
+    except ReportNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PDFUnavailableError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    except ReportWordingError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
+    analysis = result.scalar_one_or_none()
+    if analysis is None:  # pragma: no cover - raced deletion
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    rep_result = await db.execute(
+        select(Report)
+        .where(Report.analysis_id == analysis.id)
+        .order_by(desc(Report.id))
+    )
+    report = rep_result.scalars().first()
+    if report is None:  # pragma: no cover - defensive
+        raise HTTPException(status_code=404, detail="Report was not stored")
+    return ReportResponse(
+        analysis_id=analysis_id,
+        format=body.format,
+        file_path=report.file_path,
+        file_hash=report.file_hash,
+        report_version=REPORT_VERSION,
+        created_at=report.created_at,
+    )
+
+
+@app.get("/analyses/{analysis_id}/report")
+async def download_report(
+    analysis_id: str,
+    format: str = Query(default="html", description="Report format to download"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a previously built scientific report file."""
+    from fastapi.responses import FileResponse
+
+    from exosphere.api.db import Report
+
+    if format not in ("html", "pdf"):
+        raise HTTPException(status_code=422, detail="format must be 'html' or 'pdf'")
+    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
+    analysis = result.scalar_one_or_none()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    rep_result = await db.execute(
+        select(Report)
+        .where(Report.analysis_id == analysis.id)
+        .order_by(desc(Report.id))
+    )
+    report = None
+    for row in rep_result.scalars().all():
+        if row.file_path.endswith(f".{format}"):
+            report = row
+            break
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {format} report built yet; POST /analyses/{analysis_id}/report first",
+        )
+    media_type = "text/html" if format == "html" else "application/pdf"
+    return FileResponse(
+        report.file_path,
+        media_type=media_type,
+        filename=f"{analysis_id}_report.{format}",
+    )
 
 
 @app.delete("/analyses/{analysis_id}")

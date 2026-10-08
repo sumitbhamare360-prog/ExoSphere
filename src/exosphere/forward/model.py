@@ -315,32 +315,31 @@ def _compute_transmission_radius(
     slant_factor = np.sqrt(2.0 * np.pi * r_ref_m / H)
     tau_slant = np.cumsum(dtau * slant_factor, axis=1)
 
-    # Find radius where tau_slant = 1 for each wavelength
-    # Interpolate altitude where tau crosses 1
-    rp = np.zeros(n_wl)
-    for i in range(n_wl):
-        tau = tau_slant[i, :]
-        # Find first layer where tau >= 1 (from top down)
-        idx = np.searchsorted(tau, 1.0, side="left")
-        if idx == 0:
-            rp[i] = r_ref_m + altitude[0]
-        elif idx >= n_layers:
-            rp[i] = r_ref_m + altitude[-1]
-        else:
-            # Linear interpolation in log(tau) vs altitude
-            t0, t1 = tau[idx - 1], tau[idx]
-            a0, a1 = altitude[idx - 1], altitude[idx]
-            if t1 > t0 and t0 > 0:
-                # Log interpolation when both values positive
-                frac = (np.log(1.0) - np.log(t0)) / (np.log(t1) - np.log(t0))
-                rp[i] = r_ref_m + a0 + frac * (a1 - a0)
-            elif t1 > t0:
-                # t0 == 0: use linear interpolation from (0,a0) to (t1,a1)
-                # At tau=1, fraction = 1/t1
-                frac = 1.0 / t1
-                rp[i] = r_ref_m + a0 + frac * (a1 - a0)
-            else:
-                rp[i] = r_ref_m + a0
+    # Find radius where tau_slant = 1 for each wavelength.
+    # tau_slant is non-decreasing along layers (cumsum of non-negative dtau),
+    # so the first crossing index per row vectorizes exactly like the former
+    # per-wavelength `searchsorted(tau, 1.0, side="left")` loop.
+    crossed_at_top = tau_slant[:, 0] >= 1.0
+    ever_crosses = tau_slant[:, -1] >= 1.0
+    idx = np.argmax(tau_slant >= 1.0, axis=1)
+    # For rows that cross strictly inside, argmax == searchsorted-left in [1, n_layers).
+    idx_safe = np.clip(idx, 1, n_layers - 1)
+    t0 = tau_slant[np.arange(n_wl), idx_safe - 1]
+    t1 = tau_slant[np.arange(n_wl), idx_safe]
+    a0 = altitude[idx_safe - 1]
+    a1 = altitude[idx_safe]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_frac = (np.log(1.0) - np.log(t0)) / (np.log(t1) - np.log(t0))
+    lin_frac = 1.0 / t1
+    use_log = (t1 > t0) & (t0 > 0)
+    use_lin = (t1 > t0) & ~(t0 > 0)
+    frac = np.where(use_log, log_frac, np.where(use_lin, lin_frac, 0.0))
+    rp_inner = r_ref_m + a0 + frac * (a1 - a0)
+    rp = np.where(
+        crossed_at_top,
+        r_ref_m + altitude[0],
+        np.where(~ever_crosses, r_ref_m + altitude[-1], rp_inner),
+    )
 
     return rp
 

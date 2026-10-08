@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ExoSphere scientific report {{ ctx.analysis_id }}</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2em auto; padding: 0 1em; color: #111; }
+  h1 { font-size: 1.6em; }
+  h2 { font-size: 1.25em; border-bottom: 2px solid #333; padding-bottom: 0.2em; margin-top: 2em; }
+  table { border-collapse: collapse; margin: 1em 0; width: 100%; }
+  th, td { border: 1px solid #999; padding: 0.3em 0.6em; text-align: left; font-size: 0.9em; }
+  th { background: #eee; }
+  .badge { display: inline-block; padding: 0.1em 0.6em; border-radius: 0.6em; font-weight: bold; }
+  .good { background: #d4edda; } .limited { background: #fff3cd; } .poor { background: #f8d7da; }
+  .supported { color: #155724; font-weight: bold; }
+  .weak { color: #856404; font-weight: bold; }
+  .not-constrained { color: #555; }
+  figure { margin: 1.5em 0; }
+  figcaption { font-size: 0.85em; color: #333; }
+  img { max-width: 100%; }
+  .notrun { background: #f5f5f5; border: 1px dashed #999; padding: 0.6em; }
+  .mono { font-family: monospace; font-size: 0.85em; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<section id="sec-title">
+<h1>ExoSphere scientific report</h1>
+<table>
+<tr><th>Target</th><td>{{ ctx.planet_name }}</td></tr>
+<tr><th>Analysis ID</th><td class="mono">{{ ctx.analysis_id }}</td></tr>
+<tr><th>Generated (UTC)</th><td>{{ ctx.generated_utc }}</td></tr>
+<tr><th>Report version</th><td class="mono">{{ ctx.report_version }}</td></tr>
+</table>
+<h2>1. Summary</h2>
+<p>{{ ctx.summary }}</p>
+</section>
+
+<section id="sec-data">
+<h2>2. Data</h2>
+<table>
+<tr><th>Item</th><th>Value</th><th>Unit / note</th></tr>
+<tr><td>Source archive</td><td>{{ ctx.data.source_archive }}</td><td></td></tr>
+<tr><td>Observation / spectrum ID</td><td class="mono">{{ ctx.data.observation_id }}</td><td></td></tr>
+<tr><td>Spectrum record ID</td><td class="mono">{{ ctx.data.spectrum_id }}</td><td></td></tr>
+<tr><td>Telescope / instrument</td><td>{{ ctx.data.telescope }} / {{ ctx.data.instrument }}</td><td></td></tr>
+<tr><td>Wavelength unit</td><td>{{ ctx.data.units_wavelength }}</td><td>micrometres</td></tr>
+<tr><td>Transit-depth unit</td><td>{{ ctx.data.units_depth }}</td><td>dimensionless</td></tr>
+<tr><td>Number of points</td><td>{{ ctx.data.n_points if ctx.data.n_points is not none else "not recorded" }}</td><td>points</td></tr>
+<tr><td>Wavelength coverage</td><td>{{ fmt(ctx.data.wavelength_min_um) }} to {{ fmt(ctx.data.wavelength_max_um) }}</td><td>µm</td></tr>
+<tr><td>Coverage fraction of 0.6-5.3 µm</td><td>{{ fmt(ctx.data.coverage_fraction) }}</td><td>dimensionless fraction</td></tr>
+<tr><td>Input spectrum checksum</td><td class="mono">{{ ctx.data.input_hash }}</td><td>sha256</td></tr>
+</table>
+</section>
+
+<section id="sec-quality">
+<h2>3. Data quality</h2>
+{% if ctx.quality.ran %}
+<p>Overall suitability: <span class="badge {{ ctx.quality.suitability|lower }}">{{ ctx.quality.suitability }}</span></p>
+<table>
+<tr><th>Metric</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Points assessed</td><td>{{ ctx.quality.n_points }}</td><td>points</td></tr>
+<tr><td>Wavelength range</td><td>{{ fmt(ctx.quality.wavelength_min_um) }} to {{ fmt(ctx.quality.wavelength_max_um) }}</td><td>µm</td></tr>
+<tr><td>Coverage fraction (0.6-5.3 µm)</td><td>{{ fmt(ctx.quality.wavelength_coverage_fraction) }}</td><td>dimensionless fraction</td></tr>
+<tr><td>Median point S/N</td><td>{{ fmt(ctx.quality.median_snr) }}</td><td>dimensionless</td></tr>
+<tr><td>Best molecule-band S/N</td><td>{{ fmt(ctx.quality.max_band_snr) }}</td><td>dimensionless</td></tr>
+<tr><td>Flagged fraction</td><td>{{ fmt(ctx.quality.flagged_fraction) }}</td><td>dimensionless fraction</td></tr>
+<tr><td>NaN fraction</td><td>{{ fmt(ctx.quality.nan_fraction) }}</td><td>dimensionless fraction</td></tr>
+<tr><td>Outliers</td><td>{{ ctx.quality.outlier_count }} (fraction {{ fmt(ctx.quality.outlier_fraction) }})</td><td>points</td></tr>
+<tr><td>Median uncertainty</td><td>{{ fmt(ctx.quality.uncertainty.median) }}</td><td>fractional depth</td></tr>
+<tr><td>Non-positive / NaN / huge / tiny uncertainties</td><td>{{ ctx.quality.uncertainty.non_positive_count }} / {{ ctx.quality.uncertainty.nan_count }} / {{ ctx.quality.uncertainty.huge_count }} / {{ ctx.quality.uncertainty.tiny_count }}</td><td>points</td></tr>
+<tr><td>Effective resolving power</td><td>{{ fmt(ctx.quality.effective_resolving_power) }}</td><td>dimensionless</td></tr>
+</table>
+<h3>Per-molecule data-quality ratings (capability of the data, not composition)</h3>
+<table>
+<tr><th>Molecule</th><th>Rating</th><th>Band coverage</th><th>Points in bands</th><th>Band S/N</th></tr>
+{% for row in ctx.quality.per_molecule %}
+<tr><td>{{ row.molecule }}</td><td><span class="badge {{ row.rating|lower }}">{{ row.rating }}</span></td><td>{{ fmt(row.coverage_fraction) }}</td><td>{{ row.n_points }}</td><td>{{ fmt(row.snr) }}</td></tr>
+{% endfor %}
+</table>
+<p>Coverage is a dimensionless fraction; band S/N is dimensionless (90th percentile of point S/N inside the windows).</p>
+{% else %}
+<p class="notrun">Data-quality assessment was not run for this analysis.</p>
+{% endif %}
+</section>
+
+<section id="sec-preprocess">
+<h2>4. Preprocessing</h2>
+{% if ctx.preprocess.ran %}
+<p>Preprocessing version: <span class="mono">{{ ctx.preprocess.version }}</span>. Input points: {{ ctx.preprocess.n_input }}; output points: {{ ctx.preprocess.n_output }} (counts are points).</p>
+<h3>Parameters</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th></tr>
+{% for key, value in ctx.preprocess.parameters.items() %}
+<tr><td class="mono">{{ key }}</td><td>{{ value }}</td></tr>
+{% endfor %}
+</table>
+<h3>Removed points by reason ({{ ctx.preprocess.n_removed }} points total)</h3>
+<table>
+<tr><th>Reason</th><th>Count (points)</th></tr>
+{% for reason, count in ctx.preprocess.removal_counts.items() %}
+<tr><td class="mono">{{ reason }}</td><td>{{ count }}</td></tr>
+{% endfor %}
+</table>
+{% if ctx.preprocess.rebin %}
+<p>Rebinning applied: mode {{ ctx.preprocess.rebin.mode }}, {{ ctx.preprocess.rebin.n_input }} to {{ ctx.preprocess.rebin.n_output }} points.</p>
+{% else %}
+<p>No rebinning was applied.</p>
+{% endif %}
+{% else %}
+<p class="notrun">No preprocessing log is stored for this analysis (runs before Phase 9a do not record one). Quality-assessment flagged fractions are listed in Section 3.</p>
+{% endif %}
+</section>
+
+<section id="sec-ml">
+<h2>5. ML analysis (supporting information only)</h2>
+{% if ctx.ml.ran %}
+<p>Each number below is an {{ ctx.ml.score_label }}.</p>
+<table>
+<tr><th>Molecule</th><th>ML candidate score</th></tr>
+{% for row in ctx.ml.scores %}
+<tr><td>{{ row.molecule }}</td><td>{{ "%.4f"|format(row.score) if row.score is not none else "—" }} (ML candidate score)</td></tr>
+{% endfor %}
+</table>
+<table>
+<tr><th>Item</th><th>Value</th></tr>
+<tr><td>Model version</td><td class="mono">{{ ctx.ml.model_version }}</td></tr>
+<tr><td>Training dataset hash</td><td class="mono">{{ ctx.ml.dataset_hash }}</td></tr>
+<tr><td>Model config hash</td><td class="mono">{{ ctx.ml.model_config_hash }}</td></tr>
+</table>
+<p>Known limitations: ML candidate scores are not abundances and not detections. A high score does not, by itself, constrain the atmospheric composition; only the physics-based retrieval in Section 7 does. Scores depend on the training distribution (synthetic spectra from the forward model) and degrade outside it.</p>
+{% else %}
+<p class="notrun">ML scoring was not run for this analysis.</p>
+{% endif %}
+</section>
+
+<section id="sec-setup">
+<h2>6. Retrieval setup</h2>
+{% if ctx.setup.ran %}
+<p>Forward model: {{ ctx.setup.forward_model }} Model version: <span class="mono">{{ ctx.setup.forward_model_version }}</span>.</p>
+<h3>Fixed catalog parameters</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Surface gravity</td><td>{{ fmt(ctx.setup.gravity_m_s2) }}</td><td>m/s^2</td></tr>
+<tr><td>Stellar radius</td><td>{{ fmt(ctx.setup.stellar_radius_rsun) }}</td><td>R_sun</td></tr>
+<tr><td>Reference pressure</td><td>{{ fmt(ctx.setup.reference_pressure_bar) }}</td><td>bar</td></tr>
+</table>
+<h3>Priors (uniform unless stated)</h3>
+<table>
+<tr><th>Parameter</th><th>Prior form</th><th>Bounds</th></tr>
+{% for prior in ctx.setup.priors %}
+<tr><td>{{ prior.param }}</td><td>{{ prior.form }}</td><td>{{ prior.bounds }}</td></tr>
+{% endfor %}
+</table>
+<h3>Sampler settings</h3>
+<table>
+<tr><th>Setting</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Sampler</td><td>{{ ctx.setup.sampler }}</td><td></td></tr>
+<tr><td>Live points (n_live)</td><td>{{ ctx.setup.n_live }}</td><td>points</td></tr>
+<tr><td>Termination (dlogz)</td><td>{{ fmt(ctx.setup.dlogz) }}</td><td>dimensionless (natural log)</td></tr>
+<tr><td>Max iterations</td><td>{{ ctx.setup.max_iter if ctx.setup.max_iter is not none else "not recorded" }}</td><td>iterations</td></tr>
+<tr><td>Max likelihood calls</td><td>{{ ctx.setup.maxcall if ctx.setup.maxcall is not none else "unlimited" }}</td><td>calls</td></tr>
+<tr><td>Seed</td><td>{{ ctx.setup.seed }}</td><td></td></tr>
+<tr><td>Error inflation</td><td>{{ ctx.setup.error_inflation }}</td><td>dimensionless factor</td></tr>
+</table>
+{% else %}
+<p class="notrun">Retrieval was not run for this analysis; there is no setup to describe.</p>
+{% endif %}
+</section>
+
+<section id="sec-results">
+<h2>7. Results</h2>
+{% if ctx.retrieval.ran %}
+<p>Log-evidence: {{ fmt(ctx.retrieval.logz) }} +- {{ fmt(ctx.retrieval.logz_err) }} (dimensionless natural log). Posterior samples: {{ ctx.retrieval.n_samples }} (samples).</p>
+<h3>Parameter estimates (median with 68% and 95% credible intervals; best fit for reference)</h3>
+<table>
+<tr><th>Parameter</th><th>Median</th><th>68% CI</th><th>95% CI</th><th>Best fit</th><th>Unit</th></tr>
+{% for row in ctx.retrieval.rows %}
+<tr><td>{{ row.label }}</td><td>{{ fmt(row.median) }}</td><td>[{{ fmt(row.ci68_lo) }}, {{ fmt(row.ci68_hi) }}]</td><td>[{{ fmt(row.ci95_lo) }}, {{ fmt(row.ci95_hi) }}]</td><td>{{ fmt(row.best_fit) }}</td><td>{{ row.unit }}</td></tr>
+{% endfor %}
+</table>
+<h3>Per-molecule evidence (retrieval-based model comparison)</h3>
+{% if ctx.detection.ran %}
+<table>
+<tr><th>Molecule</th><th>Data quality</th><th>ln Bayes factor</th><th>Sigma-equivalent</th><th>95% upper limit (log VMR)</th><th>Assessment</th></tr>
+{% for row in ctx.detection.rows %}
+{% if row.ran %}
+<tr><td>{{ row.molecule }}</td><td>{{ row.quality_rating }}</td><td>{{ fmt(row.ln_b) }}{% if row.ln_b_err is not none %} +- {{ fmt(row.ln_b_err) }}{% endif %}</td><td>{{ fmt(row.sigma) }}</td><td>{{ fmt(row.upper_limit) }}</td><td class="{{ row.verdict_class }}">{{ row.verdict }}</td></tr>
+{% else %}
+<tr><td>{{ row.molecule }}</td><td colspan="5">model comparison not run</td></tr>
+{% endif %}
+{% endfor %}
+</table>
+<p>ln Bayes factors are dimensionless (natural log); sigma-equivalents are dimensionless; upper limits are in dex (log10 volume mixing ratio). Thresholds: supported at ln B &gt;= 5, weakly supported at 3 &lt;= ln B &lt; 5, otherwise not constrained; POOR data quality overrides to not constrained.</p>
+{% else %}
+<p class="notrun">Molecule-by-molecule model comparison was not run for this analysis.</p>
+{% endif %}
+<h3>Fit statistics</h3>
+<table>
+<tr><th>Statistic</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Data points used</td><td>{{ ctx.n_data_points }}</td><td>points</td></tr>
+<tr><td>Free parameters</td><td>{{ ctx.n_params }}</td><td>parameters</td></tr>
+<tr><td>Chi-square of best fit</td><td>{{ fmt(ctx.chi2) }}</td><td>dimensionless</td></tr>
+<tr><td>Degrees of freedom</td><td>{{ ctx.dof }}</td><td>dimensionless</td></tr>
+<tr><td>Reduced chi-square</td><td>{{ fmt(ctx.reduced_chi2) }}</td><td>dimensionless</td></tr>
+</table>
+{% if figures.get("spectrum") %}
+<figure><img src="{{ figures.spectrum }}" alt="Transmission spectrum with best-fit model"><figcaption>Observed transit depth in ppm (1e-6 fractional) with 1-sigma uncertainties, best-fit model, 68% credible band, and molecule band windows shaded (H2O blue, CO2 red, CO orange, CH4 purple, SO2 amber).</figcaption></figure>
+{% endif %}
+{% if figures.get("residuals") %}
+<figure><img src="{{ figures.residuals }}" alt="Normalized residuals"><figcaption>Normalized residuals in sigma units with +-1 and +-3 guides.</figcaption></figure>
+{% endif %}
+{% if figures.get("corner") %}
+<figure><img src="{{ figures.corner }}" alt="Posterior corner plot"><figcaption>Posterior samples: 1-D marginals on the diagonal (temperature in K, abundances in dex, radius in R_Jup, cloud pressure in log10(bar)), pairwise scatter below.</figcaption></figure>
+{% endif %}
+{% else %}
+<p class="notrun">Retrieval was not run for this analysis; there are no parameter estimates, evidence values, or fit statistics.</p>
+{% if figures.get("spectrum") %}
+<figure><img src="{{ figures.spectrum }}" alt="Observed transmission spectrum"><figcaption>Observed transit depth in ppm (1e-6 fractional) with 1-sigma uncertainties and molecule band windows shaded.</figcaption></figure>
+{% endif %}
+{% endif %}
+</section>
+
+<section id="sec-interpretation">
+<h2>8. Interpretation guardrails</h2>
+{% if ctx.interpretation.assessed %}
+{% if ctx.interpretation.supported %}
+<p class="supported">Supported (ln B &gt;= 5 with adequate data quality): {{ ctx.interpretation.supported|join(", ") }}.</p>
+{% endif %}
+{% if ctx.interpretation.weak %}
+<p class="weak">Weakly supported (3 &lt;= ln B &lt; 5): {{ ctx.interpretation.weak|join(", ") }}.</p>
+{% endif %}
+{% if ctx.interpretation.not_constrained %}
+<p class="not-constrained">Not constrained by these data: {{ ctx.interpretation.not_constrained|join(", ") }}.</p>
+{% endif %}
+{% else %}
+<p class="notrun">{{ ctx.interpretation.note }}</p>
+{% endif %}
+<p>Data-quality limitations: molecules rated POOR cannot be constrained by these data regardless of other numbers; LIMITED ratings widen the credible intervals' interpretation. See Section 3 for the per-molecule ratings.</p>
+<p>Model assumptions and limits: the retrieval assumes an isothermal atmosphere, constant-with-altitude mixing ratios, a grey cloud deck, and fixed mass, gravity and stellar radius from the catalog. There is no stellar-contamination treatment. Results are conditional on these assumptions and on the stated priors; the retrieval is not independent of them. The forward opacities used here are documented in Section 6.</p>
+</section>
+
+<section id="sec-twin">
+<h2>9. Visualization note (3D scientific digital twin)</h2>
+<p>The dashboard twin at /twin/{{ ctx.analysis_id }} renders the measured, inferred, derived and assumed parameters of this analysis as a star-planet-orbit scene with a uniform atmosphere shell. It shows no surfaces, continents, oceans, spatial molecule maps, or photographs; the atmosphere shell thickness is visually exaggerated and labelled not to scale. The twin is an illustration of the tabulated parameters, not an independent measurement.</p>
+</section>
+
+<section id="sec-provenance">
+<h2>10. Provenance</h2>
+<table>
+<tr><th>Field</th><th>Value</th><th>Unit / note</th></tr>
+{% for name, value, note in ctx.provenance_rows %}
+<tr><td>{{ name }}</td><td class="mono">{{ value }}</td><td>{{ note }}</td></tr>
+{% endfor %}
+</table>
+</section>
+
+</body>
+</html>

@@ -299,6 +299,22 @@ export const api = {
     getTwin: (analysisId: string) =>
       request<TwinParameters>(`/analyses/${analysisId}/twin`),
 
+    generateReport: (analysisId: string, format: 'html' | 'pdf' = 'html') =>
+      request<{
+        analysis_id: string;
+        format: string;
+        file_path: string;
+        file_hash: string;
+        report_version: string;
+        created_at: string | null;
+      }>(`/analyses/${analysisId}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ format }),
+      }),
+
+    reportDownloadUrl: (analysisId: string, format: 'html' | 'pdf' = 'html') =>
+      `${API_BASE}/analyses/${analysisId}/report?format=${format}`,
+
     // Config
     getMoleculeBands: () => 
       request<{
@@ -340,6 +356,7 @@ export const api = {
     model: (id: string) => ['analyses', 'model', id],
     provenance: (id: string) => ['analyses', 'provenance', id],
     twin: (id: string) => ['analyses', 'twin', id],
+    report: (id: string) => ['analyses', 'report', id],
     moleculeBands: ['config', 'moleculeBands'],
   },
 };

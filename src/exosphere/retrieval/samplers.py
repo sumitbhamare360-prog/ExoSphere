@@ -33,6 +33,12 @@ class SamplerConfig:
     # Sampler choice: "dynesty" or "jaxns"
     sampler: str = "dynesty"
 
+    # dynesty proposal method: "auto" (uniform multi-ellipsoid) or "rslice".
+    # "rslice" (slice sampling from live points) is the default: uniform
+    # proposals suffer acceptance collapse on our vague 8-D priors, while
+    # slice sampling converges (DECISIONS.md Phase 9a). Still seeded.
+    sample: str = "rslice"
+
     # Number of live points
     n_live: int = 500
 
@@ -41,6 +47,9 @@ class SamplerConfig:
 
     # Maximum number of iterations (safety)
     max_iter: int | None = None
+
+    # Maximum number of likelihood calls (safety cap, dynesty 3.x)
+    maxcall: int | None = None
 
     # Random seed
     seed: int = 42
@@ -118,18 +127,23 @@ def run_dynesty(
     log_likelihood_fn = _make_log_likelihood(spectrum, fixed, 1.27, prior_cfg, error_inflation)
 
     ndim = 8
-    sampler = dynesty.NestedSampler(
+    sampler = dynesty.DynamicNestedSampler(
         log_likelihood_fn,
         prior_transform,
         ndim,
         nlive=config.n_live,
+        sample=config.sample,
         rstate=np.random.default_rng(seed),
     )
 
     start_time = time.time()
+    # Static nested-sampling run: maxbatch=0 disables dynesty 3.x dynamic
+    # batch allocation; maxiter_init/maxcall bound the baseline run.
     sampler.run_nested(
-        dlogz=config.dlogz,
-        maxiter=config.max_iter,
+        maxiter_init=config.max_iter,
+        maxbatch=0,
+        dlogz_init=config.dlogz,
+        maxcall=config.maxcall,
         print_progress=True,
     )
     elapsed = time.time() - start_time

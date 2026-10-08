@@ -279,7 +279,7 @@ class RetrievalResult:
             best_fit=data["best_fit"],
             median=data["median"],
             ci_68=data["ci_68"],
-            ci_95=data.ci_95,
+            ci_95=data["ci_95"],
             logz_full=float(data["logz"][0]),
             logz_err_full=float(data["logz_err"][0]),
             param_names=data["param_names"].tolist(),
@@ -339,18 +339,20 @@ class RetrievalResult:
         return wl, depth
 
     def credible_band_spectrum(
-        self, fixed: PlanetFixed, n_draws: int = 100
+        self, fixed: PlanetFixed, n_draws: int = 100, seed: int | None = None
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute credible band: median, 16th, 84th percentiles of model spectra.
 
-        Draws from posterior to compute model spectra.
+        Draws from posterior to compute model spectra. Pass ``seed`` for
+        deterministic draws (report generation uses the analysis seed).
         """
         from exosphere.forward.model import ModelParams, compute_model_spectrum
 
         # Resample according to weights
         n_eff = int(1.0 / np.sum(self.weights**2))
         n_draws = min(n_draws, n_eff)
-        indices = np.random.choice(len(self.samples), size=n_draws, p=self.weights, replace=False)
+        rng = np.random.default_rng(seed)
+        indices = rng.choice(len(self.samples), size=n_draws, p=self.weights, replace=False)
 
         spectra = []
         for idx in indices:

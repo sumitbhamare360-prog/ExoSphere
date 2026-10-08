@@ -37,6 +37,40 @@ function paramByName(twin: TwinParameters, name: string) {
   return found;
 }
 
+/** Minimal scientific-report actions for a real (non-mock) analysis. */
+function ReportButtons({ analysisId }: { analysisId: string }) {
+  const [state, setState] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+
+  const generate = async () => {
+    setState('building');
+    setMessage(null);
+    try {
+      await api.generateReport(analysisId, 'html');
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage(error instanceof Error ? error.message : 'Report build failed');
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label="Scientific report">
+      <button type="button" className="btn-secondary" onClick={generate} disabled={state === 'building'}>
+        {state === 'building' ? 'Generating report…' : 'Generate report'}
+      </button>
+      {(state === 'ready') && (
+        <a className="btn-secondary" href={api.reportDownloadUrl(analysisId, 'html')} download>
+          Download
+        </a>
+      )}
+      {state === 'error' && message && (
+        <span className="text-sm text-red-600" role="alert">{message}</span>
+      )}
+    </div>
+  );
+}
+
 interface TwinViewProps {
   /** Real analysis id (fetched from the API). */
   analysisId?: string | null;
@@ -277,6 +311,11 @@ export function TwinView({ analysisId = null, mockKey = null }: TwinViewProps) {
             </span>
           )}
         </div>
+        {!useMock && analysisId && (
+          <div className="mb-3">
+            <ReportButtons analysisId={analysisId} />
+          </div>
+        )}
         <TwinPanel
           parameters={twin.parameters}
           molecules={twin.molecules}

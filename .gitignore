@@ -17,6 +17,9 @@ htmlcov/
 # Project data
 data_cache/
 *.npz
+*.db
+*.sqlite*
+*.sqlite-journal
 outputs/
 
 # Editors / OS
