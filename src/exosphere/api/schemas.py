@@ -128,13 +128,16 @@ class AnalysisCreate(BaseModel):
     n_live: int = Field(default=500, ge=50, le=2000)
     dlogz: float = Field(default=0.01, gt=0.0, le=1.0)
     max_iter: int = 50000
+    maxcall: int | None = Field(default=None, description="Max likelihood calls (safety cap)")
     seed: int = 42
     # Options
     run_ml: bool = True
     run_detection: bool = True
     run_quality: bool = True
     run_preprocess: bool = True
+    run_quality_check: bool = True
     error_inflation: float | None = None
+    error_inflation_free: bool = False
     # Fixed parameters (optional overrides)
     fixed_params: dict = Field(default_factory=dict)
 

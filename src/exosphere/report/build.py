@@ -699,12 +699,19 @@ def _summary_paragraph(ctx: dict[str, Any]) -> str:
         scored = [(r["molecule"], r["score"]) for r in ml["scores"] if r["score"] is not None]
         if scored:
             scored.sort(key=lambda item: item[1], reverse=True)
-            top = ", ".join(f"{name} ({value:.2f})" for name, value in scored[:2])
-            parts.append(
-                f"ML candidate scores (ML candidate score; not abundances or "
-                f"detections) range from {scored[-1][1]:.2f} to {scored[0][1]:.2f}, "
-                f"highest for {top}."
-            )
+            if ml.get("dataset_hash") in (None, "", "unknown"):
+                parts.append(
+                    "ML candidate scores are all "
+                    f"{scored[0][1]:.2f} (ML candidate score; no trained model "
+                    "was available, so scores are placeholders)."
+                )
+            else:
+                top = ", ".join(f"{name} ({value:.2f})" for name, value in scored[:2])
+                parts.append(
+                    "ML candidate scores (ML candidate score; not abundances or "
+                    f"detections) range from {scored[-1][1]:.2f} to {scored[0][1]:.2f}, "
+                    f"highest for {top}."
+                )
     else:
         parts.append("ML scoring was not run for this analysis.")
     return " ".join(parts)

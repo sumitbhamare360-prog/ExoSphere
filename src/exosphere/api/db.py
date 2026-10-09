@@ -273,6 +273,11 @@ class MLResult(Base):
     model_version: Mapped[str] = mapped_column(String(50))
     dataset_hash: Mapped[str] = mapped_column(String(64))
     model_config_hash: Mapped[str] = mapped_column(String(64))
+    # Full MLResult.to_dict() (coverage, grid match, warnings)
+    details_json: Mapped[dict] = mapped_column(
+        SQLiteJSON if "sqlite" in settings.database_url else JSON,
+        default={},
+    )
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -16,7 +16,7 @@ import numpy as np
 
 from exosphere.core.spectrum import Spectrum
 from exosphere.forward.model import PlanetFixed
-from exosphere.retrieval.priors import DEFAULT_PRIOR_CONFIG, PriorConfig
+from exosphere.retrieval.priors import DEFAULT_PRIOR_CONFIG, PriorConfig, unit_to_physical
 from exosphere.retrieval.results import RetrievalResult
 from exosphere.retrieval.samplers import SamplerConfig
 
@@ -76,43 +76,7 @@ def compute_bayes_factor(
     )
 
     # For the reduced model, we fix the molecule's log VMR to -12 (negligible)
-    # We can do this by modifying the prior transform
-    from exosphere.retrieval.priors import unit_to_physical
-
-    def reduced_prior_transform(u: np.ndarray) -> np.ndarray:
-        # Transform as normal, then force the molecule to -12
-        params = unit_to_physical(u, 1.27, DEFAULT_PRIOR_CONFIG)
-        params[mol_idx] = -12.0  # Force negligible
-        return params
-
-    def reduced_log_likelihood(u):
-        from exosphere.retrieval.priors import DEFAULT_PRIOR_CONFIG, log_prior
-
-        # Use modified transform
-        params = reduced_prior_transform(u)
-        lp = log_prior(params, 1.27, DEFAULT_PRIOR_CONFIG)
-        if not np.isfinite(lp):
-            return -np.inf
-        # We need spectrum and fixed - will be passed from closure
-        # This is a simplified approach - in practice we'd need to pass spectrum/fixed
-        # For now, this is a placeholder
-        return -np.inf  # Placeholder
-
-    # Actually, we need to run a full retrieval. Let's do it properly.
-    # Create a new sampler config with modified prior bounds
-    SamplerConfig(
-        sampler=sampler_config.sampler,
-        n_live=sampler_config.n_live,
-        dlogz=sampler_config.dlogz,
-        max_iter=sampler_config.max_iter,
-        seed=sampler_config.seed + 1,  # Different seed for independence
-        error_inflation=sampler_config.error_inflation,
-        n_workers=sampler_config.n_workers,
-        prior=reduced_prior,
-    )
-
-    # For dynesty, we need to create a custom prior transform that fixes the molecule
-
+    # via a custom prior transform; the sampler then explores the reduced model.
     def make_reduced_prior_transform(catalog_r_ref, prior_cfg, fixed_mol_idx, fixed_value):
         def prior_transform(u):
             params = unit_to_physical(u, catalog_r_ref, prior_cfg)
@@ -127,10 +91,12 @@ def compute_bayes_factor(
         spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation, fixed_mol_idx, fixed_value
     ):
         from exosphere.retrieval.likelihood import log_likelihood
-        from exosphere.retrieval.priors import log_prior, unit_to_physical
+        from exosphere.retrieval.priors import log_prior
 
-        def log_likelihood_fn(u):
-            params = unit_to_physical(u, catalog_r_ref, prior_cfg)
+        def log_likelihood_fn(physical_params):
+            # dynesty passes physical parameters (prior_transform applied
+            # by the sampler); only fix the molecule, never re-transform.
+            params = np.asarray(physical_params, dtype=float).copy()
             params[fixed_mol_idx] = fixed_value
             lp = log_prior(params, catalog_r_ref, prior_cfg)
             if not np.isfinite(lp):
@@ -144,7 +110,7 @@ def compute_bayes_factor(
         import dynesty
 
         ndim = 8
-        reduced_sampler = dynesty.DynamicNestedSampler(
+        reduced_sampler = dynesty.NestedSampler(
             make_reduced_log_likelihood(
                 spectrum, fixed, 1.27, DEFAULT_PRIOR_CONFIG, 0.0, mol_idx, -12.0
             ),
@@ -156,10 +122,9 @@ def compute_bayes_factor(
         )
 
         reduced_sampler.run_nested(
-            maxiter_init=sampler_config.max_iter,
-            maxbatch=0,
-            dlogz_init=sampler_config.dlogz,
+            maxiter=sampler_config.max_iter,
             maxcall=sampler_config.maxcall,
+            dlogz=sampler_config.dlogz,
             print_progress=False,
         )
 

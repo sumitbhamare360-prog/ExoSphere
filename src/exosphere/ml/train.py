@@ -372,6 +372,19 @@ def main():
     print(f"Dataset shape: X={X.shape}, y={y.shape}")
     print(f"Class balance: {y.mean(axis=0)}")
 
+    # Content hash of the dataset file (provenance for the checkpoint).
+    import hashlib
+
+    dataset_file = Path(args.data_dir) / "dataset.npz"
+    dataset_hash = ""
+    if dataset_file.exists():
+        digest = hashlib.sha256()
+        with open(dataset_file, "rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        dataset_hash = digest.hexdigest()
+    print(f"Dataset sha256: {dataset_hash[:16] if dataset_hash else 'unknown'}...")
+
     # Create model
     model = MoleculeCNN()
     print(f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
@@ -386,7 +399,7 @@ def main():
         patience=10,
         save_path=Path(args.model_dir) / "best_model.pt",
         model_version="CNN-v1",
-        dataset_hash="",  # TODO: compute from dataset
+        dataset_hash=dataset_hash,
         seed=42,
     )
 

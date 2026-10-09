@@ -27,6 +27,9 @@ OPACITY_MODE = "mock-gaussian-R1000"
 R = 1000  # Mock spectral resolution (lambda / Delta lambda)
 WAVE_MIN = 0.3  # um
 WAVE_MAX = 30.0  # um
+# Padding around a target spectrum's span when evaluating the clipped native
+# grid (um). Covers the widest PRISM bins so edge bins keep bracketing nodes.
+_TARGET_PAD_UM = 0.1
 
 # Reference pressure for radius definition
 REFERENCE_PRESSURE_BAR = 0.01  # 10 mbar
@@ -494,14 +497,30 @@ def compute_model_spectrum(
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """High-level: compute model, optionally binned to target.
 
+    When ``target_spectrum`` is given, the model is evaluated only on the
+    canonical native nodes (same 1 nm R=1000 spacing) clipped to the target
+    span plus a padding margin, then binned. Model points outside every
+    target bin can never enter a flux-conserving bin average, so the binned
+    result is identical to evaluating the full native grid, at a fraction
+    of the cost (the native 0.3-30 um grid is ~6x wider than PRISM coverage).
+
     Returns:
         (wavelength_um, depth_fraction, metadata_dict)
     """
     radtrans = get_radtrans()
-    wl, depth, elapsed = transmission_spectrum(params, fixed, radtrans=radtrans)
-
     if target_spectrum is not None:
-        wl, depth = to_instrument(wl, depth, target_spectrum)
+        edges = np.asarray(target_spectrum.wavelength_bin_edges, dtype=np.float64)
+        n_native = int((WAVE_MAX - WAVE_MIN) * R)
+        canonical = np.linspace(WAVE_MIN, WAVE_MAX, n_native)
+        lo = float(edges[0]) - _TARGET_PAD_UM
+        hi = float(edges[-1]) + _TARGET_PAD_UM
+        subgrid = canonical[(canonical >= lo) & (canonical <= hi)]
+        wl_native, depth_native, elapsed = transmission_spectrum(
+            params, fixed, wavelength_grid=subgrid, radtrans=radtrans
+        )
+        wl, depth = to_instrument(wl_native, depth_native, target_spectrum)
+    else:
+        wl, depth, elapsed = transmission_spectrum(params, fixed, radtrans=radtrans)
 
     meta = {
         "model_version": MOCK_VERSION,

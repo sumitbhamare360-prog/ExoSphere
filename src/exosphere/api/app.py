@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,6 +89,37 @@ app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 async def get_db() -> AsyncSession:
     async with async_session_maker() as session:
         yield session
+
+
+async def _get_analysis(db: AsyncSession, analysis_id: str) -> Analysis:
+    """Load an analysis with its relations, or raise 404.
+
+    Related tables (posteriors, ML, quality, detections) key off the
+    integer primary key, never the EXO-xxxxxx string.
+    """
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(Analysis)
+        .options(
+            selectinload(Analysis.planet),
+            selectinload(Analysis.observation),
+            selectinload(Analysis.spectrum_file),
+        )
+        .where(Analysis.analysis_id == analysis_id)
+    )
+    analysis = result.scalar_one_or_none()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis
+
+
+async def _latest_row(db: AsyncSession, model: Any, pk: int) -> Any | None:
+    """Newest row of a per-analysis table (rebuilds supersede older rows)."""
+    result = await db.execute(
+        select(model).where(model.analysis_id == pk).order_by(desc(model.id))
+    )
+    return result.scalars().first()
 
 
 # Background job runner
@@ -293,6 +325,7 @@ async def create_analysis(
             "n_live": analysis.n_live,
             "dlogz": analysis.dlogz,
             "max_iter": analysis.max_iter,
+            "maxcall": analysis.maxcall,
             "run_ml": analysis.run_ml,
             "run_detection": analysis.run_detection,
             "run_quality": analysis.run_quality,
@@ -307,22 +340,28 @@ async def create_analysis(
     await db.commit()
     await db.refresh(analysis_obj)
 
+    # The pipeline loads spectra from file paths: prefer the observation's
+    # stored spectrum file, falling back to the observation id string
+    # (resolved against data_cache by the pipeline).
+    observation_ref = observation.spectrum_file_path or analysis.observation_id or ""
+
     # Start background job
     background_tasks.add_task(
         run_analysis_job,
         analysis_obj.analysis_id,
         analysis.planet_name,
-        analysis.observation_id or "",
+        observation_ref,
         PipelineOptions(
             n_live=analysis.n_live,
             dlogz=analysis.dlogz,
             max_iter=analysis.max_iter,
+            maxcall=analysis.maxcall,
             seed=analysis.seed,
             run_ml=analysis.run_ml,
             run_detection=analysis.run_detection,
             run_quality=analysis.run_quality,
             run_preprocess=analysis.run_preprocess,
-            run_quality_check=analysis.run_quality,
+            run_quality_check=analysis.run_quality_check,
             error_inflation=analysis.error_inflation,
             error_inflation_free=analysis.error_inflation_free,
             fixed_params=analysis.fixed_params,
@@ -445,29 +484,22 @@ async def get_spectrum(
     db: AsyncSession = Depends(get_db),
 ):
     """Get spectrum data for an analysis."""
-    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
-    analysis = result.scalar_one_or_none()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    from pathlib import Path
+
+    from exosphere.core.spectrum import Spectrum
+
+    analysis = await _get_analysis(db, analysis_id)
 
     # Determine which spectrum file to load
-    if cleaned and analysis.spectrum_file:
-        spec_file = analysis.spectrum_file
-    elif analysis.observation and analysis.observation.spectrum_file_path:
-        # Load from observation
-        from pathlib import Path
+    spec_path: str | None = None
+    if cleaned and analysis.spectrum_file is not None:
+        spec_path = analysis.spectrum_file.file_path
+    elif analysis.observation is not None and analysis.observation.spectrum_file_path:
+        spec_path = analysis.observation.spectrum_file_path
+    if not spec_path or not Path(spec_path).exists():
+        raise HTTPException(status_code=404, detail="Spectrum file not found")
 
-        from exosphere.core.spectrum import Spectrum
-
-        path = Path(analysis.observation.spectrum_file_path)
-        if path.exists():
-            spectrum = Spectrum.load(path)
-        else:
-            raise HTTPException(status_code=404, detail="Spectrum file not found")
-    else:
-        raise HTTPException(status_code=404, detail="No spectrum available")
-
-    spectrum = Spectrum.load(spec_file.file_path)
+    spectrum = Spectrum.load(spec_path)
 
     return SpectrumResponse(
         wavelength_um=spectrum.wavelength,
@@ -488,14 +520,37 @@ async def get_quality_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Get quality assessment report."""
-    from sqlalchemy import select
-
-    result = await db.execute(select(QualityReport).where(QualityReport.analysis_id == analysis_id))
-    report = result.scalar_one_or_none()
+    analysis = await _get_analysis(db, analysis_id)
+    result = await db.execute(select(QualityReport).where(QualityReport.analysis_id == analysis.id))
+    report = result.scalars().first()
     if not report:
         raise HTTPException(status_code=404, detail="Quality report not found")
 
-    return QualityReportResponse(**report.report_json)
+    stored = dict(report.report_json or {})
+    uncertainty = stored.get("uncertainty", {}) or {}
+    molecules = stored.get("molecules", []) or []
+    return QualityReportResponse(
+        analysis_id=analysis_id,
+        overall_suitability=stored.get("suitability", "POOR"),
+        median_snr=stored.get("median_snr"),
+        max_band_snr=stored.get("max_band_snr"),
+        wavelength_coverage_fraction=stored.get("wavelength_coverage_fraction", 0.0),
+        flagged_fraction=stored.get("flagged_fraction", 0.0),
+        nan_fraction=stored.get("nan_fraction", 0.0),
+        outlier_count=stored.get("outlier_count", 0),
+        outlier_fraction=stored.get("outlier_fraction", 0.0),
+        median_uncertainty=uncertainty.get("median"),
+        uncertainty_non_positive_count=uncertainty.get("non_positive_count", 0),
+        uncertainty_nan_count=uncertainty.get("nan_count", 0),
+        uncertainty_huge_count=uncertainty.get("huge_count", 0),
+        uncertainty_tiny_count=uncertainty.get("tiny_count", 0),
+        effective_resolving_power=stored.get("effective_resolving_power"),
+        molecule_ratings=stored.get("molecule_ratings", {}),
+        molecule_details={entry.get("molecule", "?"): entry for entry in molecules},
+        thresholds=stored.get("thresholds", {}),
+        config_version=stored.get("config_version", ""),
+        method=stored.get("method", {}),
+    )
 
 
 @app.get("/analyses/{analysis_id}/ml", response_model=MLScoresResponse)
@@ -504,15 +559,16 @@ async def get_ml_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Get ML candidate scores."""
-    from sqlalchemy import select
-
     from exosphere.api.db import MLResult as DBMLResult
 
-    result = await db.execute(select(DBMLResult).where(DBMLResult.analysis_id == analysis_id))
-    ml_result = result.scalar_one_or_none()
+    analysis = await _get_analysis(db, analysis_id)
+    result = await db.execute(select(DBMLResult).where(DBMLResult.analysis_id == analysis.id))
+    ml_result = result.scalars().first()
     if not ml_result:
         raise HTTPException(status_code=404, detail="ML results not found")
 
+    details = dict(getattr(ml_result, "details_json", None) or {})
+    wavelength_range = details.get("input_wavelength_range") or (0.0, 0.0)
     return MLScoresResponse(
         analysis_id=analysis_id,
         scores=ml_result.scores_json,
@@ -520,10 +576,10 @@ async def get_ml_results(
         dataset_hash=ml_result.dataset_hash,
         model_config_hash=ml_result.model_config_hash,
         timestamp=ml_result.created_at.isoformat() + "Z",
-        input_coverage_fraction=1.0,
-        input_wavelength_range=(0.0, 0.0),  # TODO
-        grid_match=True,
-        warnings=[],
+        input_coverage_fraction=float(details.get("input_coverage_fraction", 0.0)),
+        input_wavelength_range_um=(float(wavelength_range[0]), float(wavelength_range[1])),
+        grid_match=bool(details.get("grid_match", False)),
+        warnings=list(details.get("warnings", ["ML metadata not stored for this run"])),
     )
 
 
@@ -532,47 +588,47 @@ async def get_retrieval(
     analysis_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get retrieval summary."""
-    from sqlalchemy import select
+    """Get retrieval summary (median + credible intervals, never bare points)."""
+    from pathlib import Path
 
     from exosphere.api.db import Posterior
 
-    result = await db.execute(select(Posterior).where(Posterior.analysis_id == analysis_id))
-    posterior = result.scalar_one_or_none()
+    analysis = await _get_analysis(db, analysis_id)
+    posterior = await _latest_row(db, Posterior, analysis.id)
     if not posterior:
         raise HTTPException(status_code=404, detail="Retrieval results not found")
 
-    # Get full analysis for full results
-    from exosphere.api.db import Analysis
+    summary = dict(posterior.summary_json or {})
+    ci_95: dict[str, list[float]] = {}
+    runtime_s = 0.0
+    npz_path = Path(posterior.file_path) if posterior.file_path else None
+    if npz_path is not None and npz_path.exists():
+        from exosphere.retrieval.results import RetrievalResult
 
-    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
-    result.scalar_one_or_none()
+        result = RetrievalResult.load_npz(npz_path)
+        for i, name in enumerate(result.param_names):
+            ci_95[name] = [float(result.ci_95[i, 0]), float(result.ci_95[i, 1])]
+        runtime_s = float(result.runtime_s)
 
+    config = dict(analysis.config_json or {})
     return RetrievalSummary(
         analysis_id=analysis_id,
         logz=posterior.logz or 0.0,
         logz_err=posterior.logz_err or 0.0,
-        best_fit={},  # Would need to load from full results
-        median={},
-        ci_68={},
-        ci_95={},
-        param_names=[
-            "T",
-            "log_h2o",
-            "log_co2",
-            "log_co",
-            "log_ch4",
-            "log_so2",
-            "r_ref",
-            "log_p_cloud",
-        ],
+        best_fit={k: float(v) for k, v in (summary.get("best_fit", {}) or {}).items()},
+        median={k: float(v) for k, v in (summary.get("median", {}) or {}).items()},
+        ci_68={
+            k: [float(lo), float(hi)] for k, (lo, hi) in (summary.get("ci_68", {}) or {}).items()
+        },
+        ci_95=ci_95,
+        param_names=list(summary.get("param_names", [])),
         n_samples=posterior.n_samples or 0,
         n_live=posterior.n_live or 0,
         dlogz=posterior.dlogz or 0.0,
-        runtime_s=0.0,
+        runtime_s=runtime_s,
         sampler="dynesty",
-        seed=0,
-        error_inflation=0.0,
+        seed=analysis.seed,
+        error_inflation=float(config.get("error_inflation", 0.0)),
     )
 
 
@@ -582,30 +638,27 @@ async def get_posterior(
     db: AsyncSession = Depends(get_db),
 ):
     """Get posterior samples for corner plot."""
-    from sqlalchemy import select
+    from pathlib import Path
 
     from exosphere.api.db import Posterior
 
-    result = await db.execute(select(Posterior).where(Posterior.analysis_id == analysis_id))
-    posterior = result.scalar_one_or_none()
+    analysis = await _get_analysis(db, analysis_id)
+    posterior = await _latest_row(db, Posterior, analysis.id)
     if not posterior:
         raise HTTPException(status_code=404, detail="Posterior not found")
 
-    # In real implementation, would load from file
+    npz_path = Path(posterior.file_path) if posterior.file_path else None
+    if npz_path is None or not npz_path.exists():
+        raise HTTPException(status_code=404, detail="Posterior samples file not found")
+
+    from exosphere.retrieval.results import RetrievalResult
+
+    result = RetrievalResult.load_npz(npz_path)
     return PosteriorSamplesResponse(
         analysis_id=analysis_id,
-        samples=[],
-        weights=[],
-        param_names=[
-            "T",
-            "log_h2o",
-            "log_co2",
-            "log_co",
-            "log_ch4",
-            "log_so2",
-            "r_ref",
-            "log_p_cloud",
-        ],
+        samples=[[float(v) for v in row] for row in result.samples],
+        weights=[float(w) for w in result.weights],
+        param_names=list(result.param_names),
         logz=posterior.logz or 0.0,
         logz_err=posterior.logz_err or 0.0,
     )
@@ -621,8 +674,11 @@ async def get_detection(
 
     from exosphere.api.db import DetectionResult as DBDetectionResult
 
+    analysis = await _get_analysis(db, analysis_id)
     result = await db.execute(
-        select(DBDetectionResult).where(DBDetectionResult.analysis_id == analysis_id)
+        select(DBDetectionResult)
+        .where(DBDetectionResult.analysis_id == analysis.id)
+        .order_by(desc(DBDetectionResult.id))
     )
     detections = result.scalars().all()
 
@@ -653,23 +709,55 @@ async def get_model(
     analysis_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get best-fit model spectrum with credible band."""
-    from sqlalchemy import select
+    """Get best-fit model spectrum with credible band (binned to observed grid)."""
+    from pathlib import Path
 
-    from exosphere.api.db import Analysis
+    import numpy as np
 
-    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
-    analysis = result.scalar_one_or_none()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    from exosphere.api.db import Posterior
+    from exosphere.core.spectrum import Spectrum
+    from exosphere.forward.model import PlanetFixed, to_instrument
+    from exosphere.retrieval.results import RetrievalResult
 
+    analysis = await _get_analysis(db, analysis_id)
+    posterior = await _latest_row(db, Posterior, analysis.id)
+    if not posterior or not posterior.file_path or not Path(posterior.file_path).exists():
+        raise HTTPException(status_code=404, detail="Retrieval results not found")
+
+    spec_path: str | None = None
+    if analysis.spectrum_file is not None:
+        spec_path = analysis.spectrum_file.file_path
+    elif analysis.observation is not None and analysis.observation.spectrum_file_path:
+        spec_path = analysis.observation.spectrum_file_path
+    if not spec_path or not Path(spec_path).exists():
+        raise HTTPException(status_code=404, detail="Spectrum file not found")
+    spectrum = Spectrum.load(spec_path)
+
+    planet = analysis.planet
+    if planet is None or planet.surface_gravity_m_s2 is None or planet.st_rad is None:
+        raise HTTPException(status_code=404, detail="Catalog parameters missing for model")
+    fixed = PlanetFixed(
+        gravity_m_s2=float(planet.surface_gravity_m_s2),
+        stellar_radius_rsun=float(planet.st_rad),
+        reference_pressure_bar=0.01,
+    )
+    result = RetrievalResult.load_npz(posterior.file_path)
+    native_wl, native_best = result.best_fit_spectrum(fixed)
+    mw, mb = to_instrument(np.asarray(native_wl), np.asarray(native_best), spectrum)
+    med, lo, hi = result.credible_band_spectrum(fixed, n_draws=64, seed=analysis.seed)
+    _, med_b = to_instrument(np.asarray(native_wl), np.asarray(med), spectrum)
+    _, lo_b = to_instrument(np.asarray(native_wl), np.asarray(lo), spectrum)
+    _, hi_b = to_instrument(np.asarray(native_wl), np.asarray(hi), spectrum)
     return BestFitSpectrumResponse(
         analysis_id=analysis_id,
-        wavelength_um=[],
-        best_fit_depth=[],
-        median_depth=[],
-        ci_lo=[],
-        ci_hi=[],
+        wavelength_um=[float(v) for v in mw],
+        best_fit_depth=[float(v) for v in mb],
+        median_depth=[float(v) for v in med_b],
+        ci_lo=[float(v) for v in lo_b],
+        ci_hi=[float(v) for v in hi_b],
+        observed_wavelength_um=[float(v) for v in spectrum.wavelength],
+        observed_depth=[float(v) for v in spectrum.transmission],
+        observed_uncertainty=[float(v) for v in spectrum.uncertainty],
     )
 
 
@@ -679,28 +767,26 @@ async def get_provenance(
     db: AsyncSession = Depends(get_db),
 ):
     """Get full provenance record."""
-    result = await db.execute(select(Analysis).where(Analysis.analysis_id == analysis_id))
-    analysis = result.scalar_one_or_none()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = await _get_analysis(db, analysis_id)
+    observation = analysis.observation
+    stored = dict(analysis.provenance_json or {})
+    config = dict(analysis.config_json or {})
 
     return ProvenanceResponse(
         analysis_id=analysis_id,
         planet=analysis.planet.name if analysis.planet else None,
-        observation_id=analysis.observation_id,
-        telescope=analysis.observation.telescope if analysis.observation else None,
-        instrument=analysis.observation.instrument if analysis.observation else None,
-        source_archive=analysis.observation.source_archive if analysis.observation else None,
-        input_data_version=None,
-        input_data_hash=None,
-        preprocessing_version=analysis.provenance_json.get("preprocessing_version")
-        if analysis.provenance_json
-        else None,
-        ml_model_version=None,
-        retrieval_model_version=None,
-        retrieval_parameters=analysis.config_json or {},
+        observation_id=observation.observation_id if observation else None,
+        telescope=observation.telescope if observation else None,
+        instrument=observation.instrument if observation else None,
+        source_archive=observation.source_archive if observation else None,
+        input_data_version=stored.get("input_data_version"),
+        input_data_hash=stored.get("input_data_hash"),
+        preprocessing_version=stored.get("preprocessing_version"),
+        ml_model_version=stored.get("ml_model_version"),
+        retrieval_model_version=stored.get("retrieval_model_version"),
+        retrieval_parameters=config,
         timestamp=analysis.created_at.isoformat() + "Z",
-        result_reference=None,
+        result_reference=stored.get("result_reference"),
     )
 
 

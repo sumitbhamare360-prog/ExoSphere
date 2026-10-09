@@ -283,10 +283,13 @@ class Pipeline:
         if path.exists():
             return Spectrum.load(path)
 
-        # Try to find in benchmark
+        # Try to find in benchmark (observation ids use "/" separators while
+        # cached files flatten them to "_")
         bench_dir = Path("data_cache/benchmark")
-        for f in bench_dir.glob(f"*{observation_ref}*.npz"):
-            return Spectrum.load(f)
+        for pattern in (f"*{observation_ref}*.npz", f"*{observation_ref.replace('/', '_')}*.npz"):
+            matches = sorted(bench_dir.glob(pattern))
+            if matches:
+                return Spectrum.load(matches[0])
 
         # Check cache
         cache_path = Path("data_cache") / observation_ref
@@ -381,11 +384,21 @@ class Pipeline:
             self.options.seed,
         )
 
+    async def _analysis_pk(self) -> int:
+        """Integer primary key of this analysis row (related tables key off it)."""
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Analysis).where(Analysis.analysis_id == self.analysis_id)
+            )
+            analysis = result.scalar_one()
+            return analysis.id
+
     async def _save_quality_report(self, report):
+        analysis_pk = await self._analysis_pk()
         async with async_session_maker() as session:
             async with session.begin():
                 db_report = DBQualityReport(
-                    analysis_id=self.analysis_id,
+                    analysis_id=analysis_pk,
                     report_json=report.model_dump(mode="json"),
                 )
                 session.add(db_report)
@@ -422,14 +435,22 @@ class Pipeline:
                     analysis.spectrum_file_id = spectrum_file.id
 
     async def _save_ml_result(self, result: Any):
+        analysis_pk = await self._analysis_pk()
+        details: dict = {}
+        if hasattr(result, "to_dict"):
+            try:
+                details = dict(result.to_dict())
+            except Exception:
+                details = {}
         async with async_session_maker() as session:
             async with session.begin():
                 db_result = DBMLResult(
-                    analysis_id=self.analysis_id,
+                    analysis_id=analysis_pk,
                     scores_json=result.scores,
                     model_version=result.model_version,
                     dataset_hash=result.dataset_hash,
                     model_config_hash=result.model_config_hash,
+                    details_json=details,
                 )
                 session.add(db_result)
 
@@ -462,7 +483,7 @@ class Pipeline:
         async with async_session_maker() as session:
             async with session.begin():
                 posterior = Posterior(
-                    analysis_id=self.analysis_id,
+                    analysis_id=await self._analysis_pk(),
                     file_path=str(output_path),
                     file_hash=file_hash,
                     logz=result.logz,
@@ -475,11 +496,12 @@ class Pipeline:
                 session.add(posterior)
 
     async def _save_detection_results(self, results: dict):
+        analysis_pk = await self._analysis_pk()
         async with async_session_maker() as session:
             async with session.begin():
                 for mol, info in results.items():
                     det = DetectionResult(
-                        analysis_id=self.analysis_id,
+                        analysis_id=analysis_pk,
                         molecule=mol,
                         ln_bayes_factor=info.get("ln_B"),
                         ln_bayes_factor_err=info.get("ln_B_err"),
@@ -495,7 +517,7 @@ class Pipeline:
         # Generate corner plot
         # Generate best-fit spectrum
         # Generate report
-        pass
+        await self._update_db_status("completed", "completed", 1.0, "Analysis completed")
 
     def _build_result(self) -> dict:
         """Build final result dictionary."""

@@ -332,11 +332,26 @@ is logged here.
     retrieval infeasible). Rewrote as a vectorized first-crossing search; verified
     bitwise-identical output (max abs diff 0.0 over 6 random atmospheres) and ~60x
     faster. Same math, same branch semantics.
+    Additionally, `compute_model_spectrum(..., target_spectrum=...)` now evaluates
+    only the canonical native nodes (same 1 nm R=1000 spacing) clipped to the
+    target span + 0.1 um padding before binning: out-of-range points can never
+    enter a flux-conserving bin average, so binned likelihood values are verified
+    bitwise-identical (max diff 0.0 over 4 random atmospheres) at ~5x speed.
+    Untouched paths: explicit `wavelength_grid=` callers (twin), the full native
+    grid default (ML dataset generation, best-fit/credible-band figures).
 
 45. **dynesty 3.x static-run settings.** `DynamicNestedSampler` with `maxbatch=0`
     (baseline run only), `maxiter_init`/`maxcall` caps, `dlogz_init` from options.
-    Real WASP-39 b run uses CI-grade settings (n_live=75, dlogz=0.5, maxcall=40000,
-    seed=42); nested detection models reuse the same config.
+    Real WASP-39 b run uses CI-grade settings (n_live=50, dlogz=0.5,
+    max_iter=12000, maxcall=30000, seed=42); nested detection models reuse the
+    same config. Expected log-evidence uncertainty ~0.7 (reported with every
+    number); support thresholds are applied to ln B values with their errors.
+
+46. **Related tables key off the integer analysis PK.** The pipeline wrote the
+    `EXO-xxxxxx` string into integer `analysis_id` FK columns (SQLite accepted
+    it, but integer-PK lookups then miss). All `_save_*` now resolve the row id
+    via `_analysis_pk()`. The stale dev `exosphere.db` (Phase 6 schema, no
+    `summary_json` column) was deleted and recreated by `init_db`.
 
 46. **Slice sampling (`sample="rslice"`) as the dynesty proposal default.**
     Uniform multi-ellipsoid proposals (`auto`) suffer acceptance collapse on the
@@ -345,3 +360,19 @@ is logged here.
     (~4 likelihood calls per iteration, deterministic given the seed) and
     progresses steadily. Still dynesty nested sampling; `SamplerConfig.sample`
     can select `auto` if ever needed.
+
+47. **Root cause of all vague-prior retrieval failures: double prior transform.**
+    dynesty calls the likelihood with PHYSICAL parameters (it applies our
+    `prior_transform` to unit-cube proposals itself). `_make_log_likelihood`
+    (and the detection reduced-likelihood) applied `unit_to_physical` AGAIN,
+    so every evaluation ran on garbage parameters: recorded `results.logl`
+    matched no stored sample (verified max diff 1.4e7), posteriors collapsed
+    to prior bounds, ln B values were 0.0, chi2 was astronomical. Fixed by
+    removing the second transform (verified aligned max diff 0.0 under
+    dynesty==2.1.5, which is now pinned; 3.1.0's rewritten API is dropped).
+    Every retrieval result produced before this fix is invalid, including the
+    first two WASP-39 b pipeline runs. Lesson: always verify
+    `results.logl[i] == log_likelihood(results.samples[i])` when wiring a new
+    sampler version. (Note: item 46's uniform-vs-rslice observations were made
+    on the corrupted landscape, so they do not settle the proposal debate;
+    `rslice` is retained as a working, seeded default.)

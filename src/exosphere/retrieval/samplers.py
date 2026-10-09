@@ -83,14 +83,18 @@ def _make_log_likelihood(
     prior_cfg: PriorConfig,
     error_inflation: float,
 ) -> Callable[[np.ndarray], float]:
-    """Create a log-likelihood function for dynesty (unit cube -> log L)."""
+    """Create a log-likelihood function for dynesty.
 
-    def log_likelihood_fn(u: np.ndarray) -> float:
-        # Transform unit cube to physical
-        physical_params = unit_to_physical(u, 1.27, prior_cfg)
+    dynesty calls this with PHYSICAL parameters (it applies our
+    prior_transform to unit-cube proposals itself), so no
+    unit-to-physical transform happens here (doing so double-transforms
+    and silently corrupts every retrieval).
+    """
 
+    def log_likelihood_fn(physical_params: np.ndarray) -> float:
+        physical_params = np.asarray(physical_params, dtype=float)
         # Check prior
-        lp = log_prior(physical_params, 1.27, prior_cfg)
+        lp = log_prior(physical_params, catalog_r_ref, prior_cfg)
         if not np.isfinite(lp):
             return -np.inf
 
@@ -127,7 +131,7 @@ def run_dynesty(
     log_likelihood_fn = _make_log_likelihood(spectrum, fixed, 1.27, prior_cfg, error_inflation)
 
     ndim = 8
-    sampler = dynesty.DynamicNestedSampler(
+    sampler = dynesty.NestedSampler(
         log_likelihood_fn,
         prior_transform,
         ndim,
@@ -137,13 +141,11 @@ def run_dynesty(
     )
 
     start_time = time.time()
-    # Static nested-sampling run: maxbatch=0 disables dynesty 3.x dynamic
-    # batch allocation; maxiter_init/maxcall bound the baseline run.
+    # Static nested-sampling run; maxiter/maxcall bound it, dlogz stops it.
     sampler.run_nested(
-        maxiter_init=config.max_iter,
-        maxbatch=0,
-        dlogz_init=config.dlogz,
+        maxiter=config.max_iter,
         maxcall=config.maxcall,
+        dlogz=config.dlogz,
         print_progress=True,
     )
     elapsed = time.time() - start_time
