@@ -50,6 +50,7 @@ class AnalysisStage(str, PyEnum):
     DETECTION = "detection"
     FINALIZE = "finalize"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Planet(Base):

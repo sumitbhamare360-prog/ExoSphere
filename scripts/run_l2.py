@@ -43,31 +43,49 @@ NOISE_LEVELS = [
 SEEDS = [42, 123, 456]
 
 
+def _prism_grid() -> Spectrum:
+    """Benchmark PRISM grid (147 points): the realistic L2 observation grid."""
+    from exosphere.core.spectrum import Spectrum as _Spectrum
+
+    bench = (
+        REPO_ROOT
+        / "data_cache"
+        / "benchmark"
+        / "40_24_96_78_WASP_39_b_3.11466_5502_6.tbl.npz"
+    )
+    return _Spectrum.load(bench)
+
+
 def make_synthetic_spectrum(
     params: ModelParams,
     fixed: PlanetFixed,
     noise_multiplier: float,
     seed: int,
 ) -> Spectrum:
-    """Generate synthetic spectrum with noise."""
-    wl, depth, _ = compute_model_spectrum(params, fixed)
+    """Generate synthetic spectrum with noise on the PRISM benchmark grid.
+
+    The noiseless truth is evaluated on the native mock grid, binned to the
+    147-point PRISM grid with flux-conserving weights, then given
+    benchmark-like uncertainties scaled by ``noise_multiplier``.
+    """
+    from exosphere.forward.model import to_instrument
+
+    grid = _prism_grid()
+    wl_native, depth_native, _ = compute_model_spectrum(params, fixed)
+    _, depth = to_instrument(wl_native, depth_native, grid)
     rng = np.random.default_rng(seed)
 
-    # Use median uncertainty from model
-    # For synthetic test, use a fixed relative uncertainty
-    median_depth = np.median(depth)
-    # Use uncertainty proportional to depth (typical for photon noise)
-    base_uncertainty = median_depth * 0.001  # ~0.1% relative precision
-    uncertainty = np.full_like(depth, base_uncertainty) * noise_multiplier
+    # Benchmark-like uncertainties scaled by the noise multiplier.
+    base_uncertainty = np.asarray(grid.uncertainty, dtype=float) * noise_multiplier
 
-    noisy_depth = depth + rng.normal(0, uncertainty)
+    noisy_depth = depth + rng.normal(0, base_uncertainty)
 
-    edges = bin_edges_from_centers(wl)
+    edges = bin_edges_from_centers(np.asarray(grid.wavelength, dtype=float))
     prov = Provenance(analysis_id="EXO-000001", planet="SYNTH")
     return Spectrum(
-        wavelength=wl.tolist(),
+        wavelength=np.asarray(grid.wavelength, dtype=float).tolist(),
         transmission=noisy_depth.tolist(),
-        uncertainty=uncertainty.tolist(),
+        uncertainty=base_uncertainty.tolist(),
         wavelength_bin_edges=edges,
         quality_flags=[],
         observation_id=f"L2_{seed}",
@@ -84,6 +102,7 @@ def run_single_test(
     noise_multiplier: float,
     seed: int,
     sampler_config: SamplerConfig,
+    run_detection: bool = False,
 ) -> dict[str, Any]:
     """Run retrieval on a single synthetic spectrum and evaluate recovery."""
     start = time.time()
@@ -118,8 +137,11 @@ def run_single_test(
         in_ci68.append(lo68 <= true_params[i] <= hi68)
         in_ci95.append(lo95 <= true_params[i] <= hi95)
 
-    # Detection results
-    det_summary = detection_summary(result, None, None, sampler_config, seed)
+    # Detection results (nested-model comparison on the same spectrum).
+    # Skipped by default: 5 extra retrievals per case (use --run-detection).
+    det_summary: dict[str, Any] = {}
+    if run_detection:
+        det_summary = detection_summary(result, spectrum, fixed, sampler_config, seed)
 
     return {
         "name": name,
@@ -140,6 +162,7 @@ def run_l2_validation(
     sampler_config: SamplerConfig,
     full: bool = False,
     seeds: list[int] | None = None,
+    run_detection: bool = False,
 ) -> list[dict[str, Any]]:
     """Run full L2 validation suite."""
     fixed = PlanetFixed(gravity_m_s2=4.2, stellar_radius_rsun=0.93, reference_pressure_bar=0.01)
@@ -179,6 +202,7 @@ def run_l2_validation(
                     noise_multiplier=noise_mult,
                     seed=seed,
                     sampler_config=sampler_config,
+                    run_detection=run_detection,
                 )
                 result["case"] = case_name
                 result["noise_level"] = noise_name
@@ -251,6 +275,12 @@ def main():
         "--n-live", type=int, default=200, help="Number of live points (lower = faster)"
     )
     parser.add_argument("--dlogz", type=float, default=0.05, help="Stopping criterion dlogz")
+    parser.add_argument("--maxcall", type=int, default=40000, help="Max likelihood calls per run")
+    parser.add_argument(
+        "--run-detection",
+        action="store_true",
+        help="Nested-model ln B per case (5 extra retrievals each; slow)",
+    )
     parser.add_argument(
         "--output", type=str, default="outputs/l2_results.md", help="Output markdown file"
     )
@@ -261,13 +291,16 @@ def main():
         n_live=args.n_live,
         dlogz=args.dlogz,
         max_iter=50000,
+        maxcall=args.maxcall,
         seed=42,
         error_inflation=0.0,
     )
 
     print("Starting L2 synthetic validation...")
     start = time.time()
-    results = run_l2_validation(sampler_config, full=args.full, seeds=args.seeds)
+    results = run_l2_validation(
+        sampler_config, full=args.full, seeds=args.seeds, run_detection=args.run_detection
+    )
     total_time = time.time() - start
 
     print(f"Completed in {total_time:.1f} s")

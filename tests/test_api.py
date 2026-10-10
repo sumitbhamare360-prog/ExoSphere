@@ -171,11 +171,14 @@ def test_end_to_end_wasp39b(tmp_path, monkeypatch):
 @pytest.mark.slow
 def test_detection_bayes_factor_synthetic():
     """Nested-model comparison runs on the fixed reduced-likelihood path."""
+    from tests.conftest import make_synthetic_spectrum
+
     from exosphere.forward.model import PlanetFixed
     from exosphere.retrieval.detection import compute_bayes_factor
     from exosphere.retrieval.results import RetrievalResult
     from exosphere.retrieval.samplers import SamplerConfig, run_dynesty
-    from tests.conftest import make_synthetic_spectrum    wave = np.linspace(0.6, 5.3, 40)
+
+    wave = np.linspace(0.6, 5.3, 40)
     spectrum = make_synthetic_spectrum(
         wave, np.full(40, 0.021) + 1e-4 * np.sin(wave * 8), np.full(40, 5e-5)
     )
@@ -184,6 +187,9 @@ def test_detection_bayes_factor_synthetic():
     full = run_dynesty(spectrum, fixed, config, 7)
     assert isinstance(full, RetrievalResult)
 
-    ln_b, ln_b_err = compute_bayes_factor(full, spectrum, fixed, "H2O", config, 7)
+    ln_b, ln_b_err, diagnostics = compute_bayes_factor(full, spectrum, fixed, "H2O", config, 7)
     assert np.isfinite(ln_b)
     assert ln_b_err is None or np.isfinite(ln_b_err) or np.isinf(ln_b_err)
+    assert diagnostics["ncall"] > 0
+    assert diagnostics["ncall"] >= diagnostics["niter"]
+    assert diagnostics["capped"] is True

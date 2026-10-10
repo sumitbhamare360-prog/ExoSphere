@@ -825,7 +825,7 @@ def _build_context(stored: dict[str, Any]) -> dict[str, Any]:
         "max_iter": config.get("max_iter"),
         "maxcall": config.get("maxcall"),
         "seed": analysis.seed,
-        "error_inflation": config.get("error_inflation", 0.0),
+        "error_inflation": config.get("error_inflation") or 0.0,
     }
 
     provenance_rows = [

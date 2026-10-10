@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -51,6 +52,10 @@ class SamplerConfig:
     # Maximum number of likelihood calls (safety cap, dynesty 3.x)
     maxcall: int | None = None
 
+    # Checkpoint file for dynesty resume (Phase 9 hardening: survives kills).
+    # When set and the file exists, the run resumes instead of restarting.
+    checkpoint_path: str | None = None
+
     # Random seed
     seed: int = 42
 
@@ -67,13 +72,56 @@ class SamplerConfig:
 DEFAULT_SAMPLER_CONFIG = SamplerConfig()
 
 
+class PriorTransform:
+    """Picklable unit-cube -> physical transform (module level for checkpoints)."""
+
+    def __init__(self, catalog_r_ref: float, prior_cfg: PriorConfig) -> None:
+        self.catalog_r_ref = catalog_r_ref
+        self.prior_cfg = prior_cfg
+
+    def __call__(self, u: np.ndarray) -> np.ndarray:
+        return unit_to_physical(np.asarray(u, dtype=float), self.catalog_r_ref, self.prior_cfg)
+
+
 def _make_prior_transform(catalog_r_ref: float, prior_cfg: PriorConfig):
     """Create a prior transform function for dynesty (unit cube -> physical)."""
+    return PriorTransform(catalog_r_ref, prior_cfg)
 
-    def prior_transform(u: np.ndarray) -> np.ndarray:
-        return unit_to_physical(u, catalog_r_ref, prior_cfg)
 
-    return prior_transform
+class LikelihoodFunction:
+    """Picklable dynesty likelihood (module level so sampler checkpoints pickle).
+
+    dynesty calls this with PHYSICAL parameters (it applies our
+    prior_transform to unit-cube proposals itself), so no
+    unit-to-physical transform happens here (doing so double-transforms
+    and silently corrupts every retrieval).
+    """
+
+    def __init__(
+        self,
+        spectrum: Spectrum,
+        fixed: PlanetFixed,
+        catalog_r_ref: float,
+        prior_cfg: PriorConfig,
+        error_inflation: float,
+    ) -> None:
+        self.spectrum = spectrum
+        self.fixed = fixed
+        self.catalog_r_ref = catalog_r_ref
+        self.prior_cfg = prior_cfg
+        self.error_inflation = error_inflation
+
+    def __call__(self, physical_params: np.ndarray) -> float:
+        physical_params = np.asarray(physical_params, dtype=float)
+        # Check prior
+        lp = log_prior(physical_params, self.catalog_r_ref, self.prior_cfg)
+        if not np.isfinite(lp):
+            return -np.inf
+
+        # Compute log-likelihood
+        return log_likelihood(
+            physical_params, self.spectrum, self.fixed, error_inflation=self.error_inflation
+        )
 
 
 def _make_log_likelihood(
@@ -83,25 +131,8 @@ def _make_log_likelihood(
     prior_cfg: PriorConfig,
     error_inflation: float,
 ) -> Callable[[np.ndarray], float]:
-    """Create a log-likelihood function for dynesty.
-
-    dynesty calls this with PHYSICAL parameters (it applies our
-    prior_transform to unit-cube proposals itself), so no
-    unit-to-physical transform happens here (doing so double-transforms
-    and silently corrupts every retrieval).
-    """
-
-    def log_likelihood_fn(physical_params: np.ndarray) -> float:
-        physical_params = np.asarray(physical_params, dtype=float)
-        # Check prior
-        lp = log_prior(physical_params, catalog_r_ref, prior_cfg)
-        if not np.isfinite(lp):
-            return -np.inf
-
-        # Compute log-likelihood
-        return log_likelihood(physical_params, spectrum, fixed, error_inflation=error_inflation)
-
-    return log_likelihood_fn
+    """Create a log-likelihood function for dynesty (see LikelihoodFunction)."""
+    return LikelihoodFunction(spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation)
 
 
 def run_dynesty(
@@ -142,11 +173,14 @@ def run_dynesty(
 
     start_time = time.time()
     # Static nested-sampling run; maxiter/maxcall bound it, dlogz stops it.
+    checkpoint = config.checkpoint_path or None
     sampler.run_nested(
         maxiter=config.max_iter,
         maxcall=config.maxcall,
         dlogz=config.dlogz,
         print_progress=True,
+        checkpoint_file=checkpoint,
+        resume=bool(checkpoint and Path(checkpoint).exists()),
     )
     elapsed = time.time() - start_time
 

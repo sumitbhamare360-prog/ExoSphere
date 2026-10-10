@@ -165,6 +165,7 @@ async def run_analysis_job(
             n_live=options.n_live,
             dlogz=options.dlogz,
             max_iter=options.max_iter,
+            maxcall=options.maxcall,
             seed=options.seed,
             run_quality=options.run_quality,
             run_preprocess=options.run_preprocess,
@@ -172,15 +173,17 @@ async def run_analysis_job(
             run_retrieval=options.run_retrieval,
             run_detection=options.run_detection,
             run_quality_check=options.run_quality_check,
-            error_inflation=options.error_inflation,
+            error_inflation=options.error_inflation
+            if options.error_inflation is not None
+            else 0.0,
             error_inflation_free=options.error_inflation_free,
             fixed_params=options.fixed_params,
         )
 
         pipeline = Pipeline(analysis_id, pipe_options)
         await pipeline.run(
-            planet_name=options.planet_name,
-            observation_ref=options.observation_ref,
+            planet_name=planet_name,
+            observation_ref=observation_ref,
             fixed_params=options.fixed_params,
         )
 
@@ -628,7 +631,7 @@ async def get_retrieval(
         runtime_s=runtime_s,
         sampler="dynesty",
         seed=analysis.seed,
-        error_inflation=float(config.get("error_inflation", 0.0)),
+        error_inflation=float(config.get("error_inflation") or 0.0),
     )
 
 

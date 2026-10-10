@@ -269,7 +269,7 @@ class Pipeline:
         if gravity is None or stellar_radius is None:
             planet_params = get_planet_params(planet_name)
             gravity = planet_params.surface_gravity_m_s2
-            stellar_radius = planet_params.stellar_radius_rsun
+            stellar_radius = planet_params.stellar_radius_solar
         return PlanetFixed(
             gravity_m_s2=float(gravity),
             stellar_radius_rsun=float(stellar_radius),
@@ -360,7 +360,11 @@ class Pipeline:
             maxcall=self.options.maxcall,
             seed=self.options.seed,
             error_inflation=self.options.error_inflation,
+            checkpoint_path=str(
+                load_config().data_cache_dir / "checkpoints" / f"{self.analysis_id}.pkl"
+            ),
         )
+        Path(config.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
         self.state.sampler_config = config
         result = await asyncio.to_thread(
             run_dynesty,
@@ -376,12 +380,15 @@ class Pipeline:
         if not self.state.retrieval_result:
             return {}
 
+        checkpoint_dir = load_config().data_cache_dir / "checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
         return detection_summary(
             self.state.retrieval_result,
             self.state.cleaned_spectrum,
             self.state.fixed,
             self.state.sampler_config,
             self.options.seed,
+            checkpoint_dir=str(checkpoint_dir),
         )
 
     async def _analysis_pk(self) -> int:

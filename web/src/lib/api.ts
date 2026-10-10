@@ -80,11 +80,13 @@ export const api = {
     n_live?: number;
     dlogz: number;
     max_iter?: number;
+    maxcall?: number | null;
     seed: number;
     run_ml: boolean;
     run_detection: boolean;
     run_quality: boolean;
     run_preprocess: boolean;
+    run_quality_check?: boolean;
     error_inflation?: number;
     error_inflation_free?: boolean;
     fixed_params: Record<string, any>;
@@ -148,56 +150,41 @@ export const api = {
 
     getSpectrum: (analysisId: string, cleaned: boolean = false) => 
       request<{
-        wavelength: number[];
+        wavelength_um: number[];
         transmission: number[];
         uncertainty: number[];
-        wavelength_bin_edges: number[];
+        wavelength_bin_edges_um: number[];
         quality_flags: string[];
         observation_id: string;
         target_id: string;
         instrument: string;
-        provenance: Record<string, any>;
+        provenance: Record<string, any> | null;
       }>(`/analyses/${analysisId}/spectrum?cleaned=${cleaned}`),
 
     getQuality: (analysisId: string) => 
       request<{
         analysis_id: string;
-        target_id: string;
-        observation_id: string;
-        instrument: string;
-        n_points: number;
-        wavelength_min_um: number;
-        wavelength_max_um: number;
-        wavelength_coverage_fraction: number;
+        overall_suitability: 'GOOD' | 'LIMITED' | 'POOR';
         median_snr: number | null;
-        max_band_snr: number;
-        coverage: number;
-        effective_resolving_power: number;
+        max_band_snr: number | null;
+        wavelength_coverage_fraction: number;
         flagged_fraction: number;
         nan_fraction: number;
-        outliers: number;
+        outlier_count: number;
         outlier_fraction: number;
-        uncertainty: {
-          median: number;
-          non_positive_count: number;
-          nan_count: number;
-          huge_count: number;
-          tiny_count: number;
-        };
-        overall_suitability: 'GOOD' | 'LIMITED' | 'POOR';
+        median_uncertainty: number | null;
+        uncertainty_non_positive_count: number;
+        uncertainty_nan_count: number;
+        uncertainty_huge_count: number;
+        uncertainty_tiny_count: number;
+        effective_resolving_power: number | null;
         molecule_ratings: Record<string, 'GOOD' | 'LIMITED' | 'POOR'>;
-        molecule_details: Array<{
+        molecule_details: Record<string, {
           molecule: string;
           rating: 'GOOD' | 'LIMITED' | 'POOR';
           coverage_fraction: number;
           n_points: number;
-          median_snr: number | null;
-          bands: Array<{
-            wavelength_range_um: [number, number];
-            coverage_fraction: number;
-            n_points: number;
-            median_snr: number | null;
-          }>;
+          snr: number | null;
         }>;
         thresholds: Record<string, number>;
         config_version: string;

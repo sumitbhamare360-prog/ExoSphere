@@ -10,6 +10,7 @@ ln B > 3: substantial evidence; >5: strong; >10: very strong
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -27,6 +28,54 @@ MOLECULE_INDICES = {
     "CH4": 4,
     "SO2": 5,
 }
+
+
+class ReducedPriorTransform:
+    """Fixed-molecule prior transform (module level so checkpoints pickle)."""
+
+    def __init__(self, catalog_r_ref, prior_cfg, fixed_mol_idx, fixed_value):
+        self.catalog_r_ref = catalog_r_ref
+        self.prior_cfg = prior_cfg
+        self.fixed_mol_idx = fixed_mol_idx
+        self.fixed_value = fixed_value
+
+    def __call__(self, u):
+        params = unit_to_physical(
+            np.asarray(u, dtype=float), self.catalog_r_ref, self.prior_cfg
+        )
+        params[self.fixed_mol_idx] = self.fixed_value
+        return params
+
+
+class ReducedLikelihoodFunction:
+    """Reduced-model likelihood (module level so checkpoints pickle)."""
+
+    def __init__(
+        self, spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation,
+        fixed_mol_idx, fixed_value,
+    ):
+        self.spectrum = spectrum
+        self.fixed = fixed
+        self.catalog_r_ref = catalog_r_ref
+        self.prior_cfg = prior_cfg
+        self.error_inflation = error_inflation
+        self.fixed_mol_idx = fixed_mol_idx
+        self.fixed_value = fixed_value
+
+    def __call__(self, physical_params):
+        # dynesty passes physical parameters (prior_transform applied
+        # by the sampler); only fix the molecule, never re-transform.
+        from exosphere.retrieval.likelihood import log_likelihood
+        from exosphere.retrieval.priors import log_prior
+
+        params = np.asarray(physical_params, dtype=float).copy()
+        params[self.fixed_mol_idx] = self.fixed_value
+        lp = log_prior(params, self.catalog_r_ref, self.prior_cfg)
+        if not np.isfinite(lp):
+            return -np.inf
+        return log_likelihood(
+            params, self.spectrum, self.fixed, error_inflation=self.error_inflation
+        )
 
 
 def compute_bayes_factor(
@@ -78,32 +127,17 @@ def compute_bayes_factor(
     # For the reduced model, we fix the molecule's log VMR to -12 (negligible)
     # via a custom prior transform; the sampler then explores the reduced model.
     def make_reduced_prior_transform(catalog_r_ref, prior_cfg, fixed_mol_idx, fixed_value):
-        def prior_transform(u):
-            params = unit_to_physical(u, catalog_r_ref, prior_cfg)
-            params[fixed_mol_idx] = fixed_value
-            return params
-
-        return prior_transform
+        return ReducedPriorTransform(catalog_r_ref, prior_cfg, fixed_mol_idx, fixed_value)
 
     reduced_prior = make_reduced_prior_transform(1.27, DEFAULT_PRIOR_CONFIG, mol_idx, -12.0)
 
     def make_reduced_log_likelihood(
         spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation, fixed_mol_idx, fixed_value
     ):
-        from exosphere.retrieval.likelihood import log_likelihood
-        from exosphere.retrieval.priors import log_prior
-
-        def log_likelihood_fn(physical_params):
-            # dynesty passes physical parameters (prior_transform applied
-            # by the sampler); only fix the molecule, never re-transform.
-            params = np.asarray(physical_params, dtype=float).copy()
-            params[fixed_mol_idx] = fixed_value
-            lp = log_prior(params, catalog_r_ref, prior_cfg)
-            if not np.isfinite(lp):
-                return -np.inf
-            return log_likelihood(params, spectrum, fixed, error_inflation=error_inflation)
-
-        return log_likelihood_fn
+        return ReducedLikelihoodFunction(
+            spectrum, fixed, catalog_r_ref, prior_cfg, error_inflation,
+            fixed_mol_idx, fixed_value,
+        )
 
     # Run reduced model
     try:
@@ -121,11 +155,17 @@ def compute_bayes_factor(
             rstate=np.random.default_rng(seed),
         )
 
+        checkpoint = sampler_config.checkpoint_path
+        if checkpoint:
+            Path(checkpoint).parent.mkdir(parents=True, exist_ok=True)
+
         reduced_sampler.run_nested(
             maxiter=sampler_config.max_iter,
             maxcall=sampler_config.maxcall,
             dlogz=sampler_config.dlogz,
             print_progress=False,
+            checkpoint_file=checkpoint,
+            resume=bool(checkpoint and Path(checkpoint).exists()),
         )
 
         reduced_logz = reduced_sampler.results.logz[-1]
@@ -134,11 +174,29 @@ def compute_bayes_factor(
         ln_B = full_result.logz - reduced_logz
         ln_B_err = np.sqrt(full_result.logz_err**2 + reduced_logz_err**2)
 
-        return ln_B, ln_B_err
+        res = reduced_sampler.results
+        # ``results.ncall`` holds calls *per nested-sampling iteration*, not
+        # a running total.  Looking at its final element hid maxcall stops.
+        ncall = int(np.sum(res.ncall)) if hasattr(res.ncall, "__len__") else int(res.ncall)
+        diagnostics = {
+            "niter": int(res.niter),
+            "ncall": ncall,
+            "capped": bool(
+                (sampler_config.maxcall is not None and ncall >= sampler_config.maxcall)
+                or (
+                    sampler_config.max_iter is not None
+                    and int(res.niter) >= sampler_config.max_iter
+                )
+            ),
+            "logz_reduced": float(reduced_logz),
+            "logz_reduced_err": float(reduced_logz_err),
+            "logz_full": float(full_result.logz),
+        }
+        return ln_B, ln_B_err, diagnostics
 
     except Exception as e:
         warnings.warn(f"Failed to compute Bayes factor for {molecule}: {e}", stacklevel=2)
-        return 0.0, np.inf
+        return 0.0, np.inf, {"failed": True}
 
 
 def compute_all_bayes_factors(
@@ -148,10 +206,12 @@ def compute_all_bayes_factors(
     sampler_config: SamplerConfig,
     seed: int,
     molecules: list[str] | None = None,
-) -> dict[str, tuple[float, float]]:
+    checkpoint_dir: str | None = None,
+) -> dict[str, tuple[float, float, dict]]:
     """Compute ln Bayes factors for all specified molecules.
 
-    Returns dict: molecule -> (ln_B, ln_B_err)
+    Returns dict: molecule -> (ln_B, ln_B_err, diagnostics). Diagnostics
+    carry ncall/niter, whether caps stopped the run, and the reduced logZ.
     """
     if molecules is None:
         molecules = list(MOLECULE_INDICES.keys())
@@ -159,13 +219,21 @@ def compute_all_bayes_factors(
     results = {}
     for molecule in molecules:
         try:
-            bf, bf_err = compute_bayes_factor(
-                full_result, spectrum, fixed, molecule, sampler_config, seed
+            nested_config = sampler_config
+            if checkpoint_dir is not None:
+                import dataclasses
+
+                nested_config = dataclasses.replace(
+                    sampler_config,
+                    checkpoint_path=str(Path(checkpoint_dir) / f"nested_{molecule}.pkl"),
+                )
+            bf, bf_err, diagnostics = compute_bayes_factor(
+                full_result, spectrum, fixed, molecule, nested_config, seed
             )
-            results[molecule] = (bf, bf_err)
+            results[molecule] = (bf, bf_err, diagnostics)
         except Exception as e:
             warnings.warn(f"Failed to compute Bayes factor for {molecule}: {e}", stacklevel=2)
-            results[molecule] = (0.0, np.inf)
+            results[molecule] = (0.0, np.inf, {"failed": True})
 
     return results
 
@@ -241,17 +309,21 @@ def detection_summary(
     sampler_config: SamplerConfig,
     seed: int,
     molecules: list[str] | None = None,
+    checkpoint_dir: str | None = None,
 ) -> dict[str, Any]:
     """Run full detection analysis: Bayes factors + upper limits + sigma.
 
     Returns a summary dictionary suitable for JSON serialization.
     """
-    bfs = compute_all_bayes_factors(full_result, spectrum, fixed, sampler_config, seed, molecules)
+    bfs = compute_all_bayes_factors(
+        full_result, spectrum, fixed, sampler_config, seed, molecules,
+        checkpoint_dir=checkpoint_dir,
+    )
     compute_upper_limits(full_result, spectrum, fixed, sampler_config, seed, molecules)
 
     summary = {}
     for molecule in molecules or list(MOLECULE_INDICES.keys()):
-        bf, bf_err = bfs.get(molecule, (0.0, np.inf))
+        bf, bf_err, diagnostics = bfs.get(molecule, (0.0, np.inf, {"failed": True}))
         sigma = detection_sigma(bf)
         limit = full_result.upper_limits.get(molecule, None)
 
@@ -263,6 +335,7 @@ def detection_summary(
             "sigma": float(sigma),
             "status": status,
             "upper_limit_log_vmr": limit,
+            "diagnostics": diagnostics,
         }
 
     return summary

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { TwinView, type TwinMockKey } from '../components/twin/TwinView';
+import { ResultsView } from '../components/results/ResultsView';
 
 const DEMO_PLANETS: Array<{ key: TwinMockKey; name: string; note: string }> = [
   { key: 'wasp39b', name: 'WASP-39 b', note: 'Hot Saturn · benchmark target' },
@@ -20,7 +21,12 @@ export function TwinPage() {
   const isDemo = !analysisId || analysisId === 'demo';
 
   if (!isDemo) {
-    return <TwinView analysisId={analysisId} />;
+    return (
+      <div className="space-y-6">
+        <ResultsView analysisId={analysisId} />
+        <TwinView analysisId={analysisId} />
+      </div>
+    );
   }
 
   return (
