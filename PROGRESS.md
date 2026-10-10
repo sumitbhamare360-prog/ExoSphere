@@ -223,3 +223,70 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
 ### Next step
 
 **Phase 9** (see `PHASE_PROMPTS.md`): validation levels L1/L2/L3 test suite.
+
+## Phase 9a --- Scientific report generator (done, code; real report pending L3)
+
+### What was built
+
+- `src/exosphere/report/build.py` --- `build_report(analysis_id, format="html"|"pdf") -> Path`,
+  pure function of stored products (DB rows + spectrum/posterior files). Cheap plotting only:
+  best-fit/credible-band spectra from the stored posterior, chi-square arithmetic, matplotlib
+  (Agg) figures embedded as base64. Report `report-1.0.0`, 10 fixed sections (title, data,
+  quality, preprocessing, ML, setup, results, guardrails, twin note, provenance).
+- `src/exosphere/report/templates/report.html` --- section ids `sec-title..sec-provenance`.
+- Wording guard (`check_wording`): global life/habitability bans; no existence/detection
+  language in ML/summary sections; every ML number labelled "ML candidate score"; build raises
+  `ReportWordingError` on violation. PDF raises `PDFUnavailableError` (no Pango libs here) -> API 501.
+- Interpretation thresholds (DECISIONS 41): supported lnB>=5, weak 3-5, else not constrained;
+  POOR data quality overrides; ML never drives verdicts.
+- `POST /analyses/{id}/report` (build), `GET /analyses/{id}/report?format=` (download);
+  `Report` table rows + `Analysis.report_file_path`; CLI `python -m exosphere.report.build ID`.
+- Frontend: Generate/Download report buttons on TwinView (real analyses only).
+
+### Tests
+
+- `tests/test_report.py` (9 passed): full build from seeded fake analysis, graceful missing
+  parts, POOR-overrides-evidence, wording unit tests, PDF-unavailable, CLI, report API,
+  section-order snapshot (exactly the 10 ids), mock-dataset contract (both demo planets).
+- Backend total **139 passed** (130 + 9 report), ruff clean. Frontend 42 passed, oxlint 0 errors.
+
+### Supporting repairs this phase required (all logged in DECISIONS.md 42-47, 50)
+
+- **Critical**: retrieval likelihood applied the prior transform twice (dynesty passes
+  physical params); every pre-fix posterior was invalid. Verified aligned (max diff 0.0);
+  pinned `dynesty==2.1.5`. All WASP-39 b runs before 2026-10-09 are void.
+- dynesty 3.x API incompatibilities fixed; `rslice` then `rwalk` proposals (timed shootout);
+  static runs bounded (`maxiter_init/maxbatch/maxcall`); picklable likelihood/transform
+  classes for checkpoint/resume; `load_npz` typo; seeded credible bands.
+- Pipeline: retrieval/detection now receive fixed/config/seed; PreprocessLog persisted;
+  SpectrumFile FK fix; planet params DB-first; `maxcall` plumbed incl. API schema;
+  `run_analysis_job` planet/obs-ref + error-inflation-None fixes; `AnalysisStage.FAILED`;
+  `_finalize` writes full provenance + completed status; per-stage logging with analysis_id.
+- Forward model: vectorized tau-crossing + targeted native sub-grid, both verified
+  bitwise-identical (max diff 0.0), ~300x combined speedup (makes retrieval feasible).
+- Result endpoints (`/retrieval/posterior/model/quality/ml/detection/provenance/spectrum`)
+  now serve real stored data (were stubs/empty); `MLResult.details_json` added.
+- API: clean-500 handler (no stack traces), structured logging (`core/logging.py`).
+- Scope audit `scripts/audit_scope.py` passes 5/5 (molecules, ML labels, geography,
+  UI labels, provenance); tests in `tests/test_audit.py` + `tests/test_logging.py`.
+- Test isolation: shared-engine DB wiped per module fixture (fixes cross-module
+  IntegrityError); `scripts/clean_cache.sh`; `.gitignore` covers `*.db/models/`.
+
+### CI-grade pilot results (EXO-000001, n_live=50 — superseded by L3, logged for the record)
+
+- Retrieval converged: logz=-836.5±1.4, T~1600-2000 K, H2O/CO2 ~-1.2 to -2.7 dex,
+  r_ref~1.29, high cloud. Best-fit logl=-815, but reduced chi2 remains large (mock limits).
+- Detection: H2O +172, CO2 +165 (supported); CO -8.2, CH4 -8.2 (not constrained,
+  fresh-seed confirmed). SO2 nested never completed (4/5 molecules).
+- ML scores all 0.00 (no trained model; `models/` empty — training pending).
+
+### Open issues (carried into Phase 9b)
+
+- Real WASP-39 b report blocked on SO2 row + converged standard retrieval.
+- ML training (3000 samples + CNN) never completed; L2 suite never ran.
+- Background workers die within ~10 min in this environment; foreground chunks only.
+- Thermal throttling active; bound-refit overhead dominates at high nlive.
+
+### Next step
+
+**Phase 9b**: L3 standard runs + validation report + hardening (this section).

@@ -14,7 +14,6 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from exosphere.api.config import settings
-from exosphere.core.logging import get_logger
 from exosphere.api.db import (
     Analysis,
     AnalysisStage,
@@ -51,6 +50,7 @@ from exosphere.api.schemas import (
     SpectrumResponse,
     TwinParametersResponse,
 )
+from exosphere.core.logging import get_logger
 from exosphere.pipeline import PipelineOptions
 
 # In-memory job tracking (in production, use Redis or similar)

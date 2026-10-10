@@ -1,0 +1,32 @@
+# ExoSphere backend (FastAPI + retrieval).
+# Opacity data is NOT baked in: mount it and set PRT_INPUT_DATA_PATH.
+# SQLite DB persists via the exosphere-data volume.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# System deps for scientific wheels (cffi/pillow chain) and Postgres driver build.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY config/ config/
+COPY scripts/run_server.sh scripts/run_server.sh
+
+RUN pip install --upgrade pip && pip install -e .
+# Optional Postgres driver (SQLite is the default; compose wires DATABASE_URL).
+RUN pip install psycopg2-binary || true
+
+VOLUME ["/app/data_cache", "/app/opacities", "/app/models"]
+EXPOSE 8000
+
+ENV DATABASE_URL="sqlite:///./data_cache/exosphere.db" \
+    PRT_INPUT_DATA_PATH="/app/opacities"
+
+CMD ["uvicorn", "exosphere.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

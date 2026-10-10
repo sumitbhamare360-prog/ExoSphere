@@ -1,0 +1,53 @@
+# ExoSphere: API + dashboard. SQLite by default; Postgres via the
+# `postgres` profile (then set backend DATABASE_URL accordingly).
+#
+#   docker compose up --build            # SQLite, persists in exosphere-data
+#   docker compose --profile postgres up --build
+#
+# Mount real pRT opacities (when available) at ./opacities (read-only).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data_cache/exosphere.db}
+      PRT_INPUT_DATA_PATH: /app/opacities
+      EXOSPHERE_LOG_LEVEL: ${EXOSPHERE_LOG_LEVEL:-INFO}
+    volumes:
+      - exosphere-data:/app/data_cache
+      - ./models:/app/models:ro
+      - ./opacities:/app/opacities:ro
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  # Optional Postgres (profile-gated). With it up, run the backend with:
+  #   DATABASE_URL=postgresql+asyncpg://exo:exo@db:5432/exosphere
+  # Note: the backend image installs psycopg2-binary; for asyncpg add it to
+  # pyproject extras before building.
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: exo
+      POSTGRES_PASSWORD: exo
+      POSTGRES_DB: exosphere
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  exosphere-data:
+  pgdata:

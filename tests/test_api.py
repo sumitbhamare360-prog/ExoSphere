@@ -27,6 +27,14 @@ BENCH_NPZ = (
 )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_database():
+    """Wipe the shared test database once: all DB modules share one engine."""
+    from conftest import reset_database
+
+    reset_database()
+
+
 def _seed_planet_observation() -> None:
     from exosphere.api.db import Observation, Planet, async_session_maker, init_db
 

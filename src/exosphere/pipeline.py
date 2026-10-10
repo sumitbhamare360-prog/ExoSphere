@@ -77,6 +77,7 @@ class PipelineState:
     detection_results: dict | None = None
     fixed: Any | None = None
     sampler_config: Any | None = None
+    planet_name: str | None = None
 
 
 class ProgressCallback:
@@ -165,6 +166,7 @@ class Pipeline:
     ) -> dict:
         """Run the full analysis pipeline."""
         self.state.started_at = time.time()
+        self.state.planet_name = planet_name
         self.log.info("pipeline start planet=%s observation=%s", planet_name, observation_ref)
         await self._update_db_status("running", "init", 0.0, "Initializing analysis")
 
@@ -532,7 +534,66 @@ class Pipeline:
         # Generate corner plot
         # Generate best-fit spectrum
         # Generate report
+        await self._write_provenance()
         await self._update_db_status("completed", "completed", 1.0, "Analysis completed")
+
+    async def _write_provenance(self):
+        """Persist the full AGENTS.md section 5 provenance record (rule 5)."""
+        from datetime import UTC, datetime
+
+        from sqlalchemy.orm import selectinload
+
+        from exosphere.core.provenance import Provenance
+        from exosphere.preprocess.clean import PREPROCESS_VERSION
+
+        config = load_config()
+        posterior_path = config.data_cache_dir / "posteriors" / f"{self.analysis_id}.npz"
+        retrieval = self.state.retrieval_result
+        ml_result = self.state.ml_result
+        spectrum = self.state.cleaned_spectrum or self.state.spectrum
+        provenance = Provenance(
+            analysis_id=self.analysis_id,
+            planet=self.state.planet_name,
+            observation_id=spectrum.observation_id if spectrum is not None else None,
+            telescope=None,  # filled from the observation row below when known
+            instrument=spectrum.instrument if spectrum is not None else None,
+            source_archive=None,
+            input_data_hash=None,
+            preprocessing_version=PREPROCESS_VERSION
+            if self.state.cleaned_spectrum is not None
+            else None,
+            ml_model_version=ml_result.model_version if ml_result is not None else None,
+            retrieval_model_version=retrieval.forward_model_version
+            if retrieval is not None
+            else None,
+            retrieval_parameters={
+                "sampler": "dynesty",
+                "n_live": self.options.n_live,
+                "dlogz": self.options.dlogz,
+                "max_iter": self.options.max_iter,
+                "maxcall": self.options.maxcall,
+                "seed": self.options.seed,
+                "error_inflation": self.options.error_inflation,
+            },
+            timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            result_reference=str(posterior_path) if posterior_path.exists() else None,
+        )
+        async with async_session_maker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(Analysis)
+                    .options(selectinload(Analysis.observation))
+                    .where(Analysis.analysis_id == self.analysis_id)
+                )
+                analysis = result.scalar_one_or_none()
+                if analysis is None:
+                    return
+                observation = analysis.observation
+                if observation is not None:
+                    provenance.telescope = observation.telescope
+                    provenance.source_archive = observation.source_archive
+                    provenance.input_data_hash = observation.spectrum_file_hash
+                analysis.provenance = provenance
 
     def _build_result(self) -> dict:
         """Build final result dictionary."""

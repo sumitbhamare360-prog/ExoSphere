@@ -1,0 +1,72 @@
+# ExoSphere CI: fast gates on every push/PR; slow validation only manually.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_validation:
+        description: "Run slow validation (L2 fast subset)"
+        type: boolean
+        default: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Ruff
+        run: python -m ruff check src/ tests/
+      - name: Fast tests (skip slow + network)
+        run: python -m pytest -q -m "not slow and not network"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  validation-manual:
+    if: inputs.run_validation == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: L2 fast subset
+        run: python scripts/run_l2.py --n-live 50 --dlogz 0.5 --maxcall 20000 --output outputs/l2_fast.md
+      - name: Upload L2 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: l2-results
+          path: outputs/l2_fast.md

@@ -71,6 +71,14 @@ BANDS = {
 }
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_database():
+    """Wipe the shared test database once: all DB modules share one engine."""
+    from conftest import reset_database
+
+    reset_database()
+
+
 def _by_name(twin_obj: dict, name: str) -> dict:
     for param in twin_obj["parameters"]:
         if param["name"] == name:

@@ -173,18 +173,26 @@ def run_dynesty(
     log_likelihood_fn = _make_log_likelihood(spectrum, fixed, 1.27, prior_cfg, error_inflation)
 
     ndim = 8
-    sampler = dynesty.NestedSampler(
-        log_likelihood_fn,
-        prior_transform,
-        ndim,
-        nlive=config.n_live,
-        sample=config.sample,
-        rstate=np.random.default_rng(seed),
-    )
+    checkpoint = config.checkpoint_path or None
+    # ``resume=True`` only continues an *already-instantiated* dynesty
+    # sampler.  A fresh ``NestedSampler`` starts from iteration zero even if a
+    # checkpoint file is supplied to ``run_nested``.  Restore explicitly so
+    # foreground chunks genuinely continue the same seeded trajectory.
+    if checkpoint and Path(checkpoint).exists():
+        sampler = dynesty.NestedSampler.restore(checkpoint)
+        log.info("retrieval restored checkpoint=%s ncall=%d", checkpoint, sampler.ncall)
+    else:
+        sampler = dynesty.NestedSampler(
+            log_likelihood_fn,
+            prior_transform,
+            ndim,
+            nlive=config.n_live,
+            sample=config.sample,
+            rstate=np.random.default_rng(seed),
+        )
 
     start_time = time.time()
     # Static nested-sampling run; maxiter/maxcall bound it, dlogz stops it.
-    checkpoint = config.checkpoint_path or None
     sampler.run_nested(
         maxiter=config.max_iter,
         maxcall=config.maxcall,

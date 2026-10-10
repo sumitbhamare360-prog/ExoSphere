@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,25 @@ from exosphere.core.provenance import Provenance
 from exosphere.core.spectrum import Spectrum
 from exosphere.data.loaders.binning import bin_edges_from_centers
 from exosphere.quality.assess import load_quality_config
+
+
+def reset_database() -> None:
+    """Drop and recreate all tables on the currently configured engine.
+
+    All DB-backed test modules share one engine (bound to whichever
+    DATABASE_URL was set when ``exosphere.api`` was first imported), so each
+    such module must call this once before seeding — otherwise identical
+    seeded ids (planets, observations, analyses) collide across modules.
+    Imports are deferred so this never binds the database URL early.
+    """
+    from exosphere.api.db import Base, engine
+
+    async def _reset() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_reset())
 
 # Source values (microns / percent) taken from the NASA Exoplanet Archive
 # download of the WASP-39 b NIRSpec PRISM transmission spectrum

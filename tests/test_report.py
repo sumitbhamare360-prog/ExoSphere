@@ -25,7 +25,16 @@ from exosphere.report.build import (  # noqa: E402
     main,
 )
 
-PARAM_NAMES = ["T", "log_h2o", "log_co2", "log_co", "log_ch4", "log_so2", "r_ref", "log_p_cloud"]
+PARAM_NAMES = ["T", "log_h2o", "log_co2", "log_co", "log_ch4", "log_so2", "r_ref",
+             "log_p_cloud"]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_database():
+    """Wipe the shared test database once: all DB modules share one engine."""
+    from conftest import reset_database
+
+    reset_database()
 CENTER = np.array([1100.0, -3.5, -4.2, -5.0, -6.0, -7.0, 1.27, -1.0])
 SCALES = np.array([80.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.03, 0.4])
 

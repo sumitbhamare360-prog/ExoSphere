@@ -144,20 +144,25 @@ def compute_bayes_factor(
         import dynesty
 
         ndim = 8
-        reduced_sampler = dynesty.NestedSampler(
-            make_reduced_log_likelihood(
-                spectrum, fixed, 1.27, DEFAULT_PRIOR_CONFIG, 0.0, mol_idx, -12.0
-            ),
-            reduced_prior,
-            ndim,
-            nlive=sampler_config.n_live,
-            sample=sampler_config.sample,
-            rstate=np.random.default_rng(seed),
-        )
-
         checkpoint = sampler_config.checkpoint_path
         if checkpoint:
             Path(checkpoint).parent.mkdir(parents=True, exist_ok=True)
+
+        # As in the full retrieval, dynesty requires an explicit restore:
+        # ``resume=True`` on a newly constructed sampler restarts it.
+        if checkpoint and Path(checkpoint).exists():
+            reduced_sampler = dynesty.NestedSampler.restore(checkpoint)
+        else:
+            reduced_sampler = dynesty.NestedSampler(
+                make_reduced_log_likelihood(
+                    spectrum, fixed, 1.27, DEFAULT_PRIOR_CONFIG, 0.0, mol_idx, -12.0
+                ),
+                reduced_prior,
+                ndim,
+                nlive=sampler_config.n_live,
+                sample=sampler_config.sample,
+                rstate=np.random.default_rng(seed),
+            )
 
         reduced_sampler.run_nested(
             maxiter=sampler_config.max_iter,
