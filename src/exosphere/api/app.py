@@ -6,13 +6,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from exosphere.api.config import settings
+from exosphere.core.logging import get_logger
 from exosphere.api.db import (
     Analysis,
     AnalysisStage,
@@ -83,6 +85,21 @@ app.add_middleware(
 
 # Static files for outputs
 app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
+
+api_log = get_logger("exosphere.api")
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """HTTP errors as clean JSON (no stack traces in responses, ever)."""
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort handler: traceback goes to the server log, clients get a message."""
+    api_log.error("unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Dependency for DB session

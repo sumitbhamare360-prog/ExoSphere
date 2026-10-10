@@ -34,11 +34,14 @@ class SamplerConfig:
     # Sampler choice: "dynesty" or "jaxns"
     sampler: str = "dynesty"
 
-    # dynesty proposal method: "auto" (uniform multi-ellipsoid) or "rslice".
-    # "rslice" (slice sampling from live points) is the default: uniform
-    # proposals suffer acceptance collapse on our vague 8-D priors, while
-    # slice sampling converges (DECISIONS.md Phase 9a). Still seeded.
-    sample: str = "rslice"
+    # dynesty proposal method: "rwalk" (random walk, default), "rslice",
+    # "auto", ... "rwalk" is the default: in a timed shootout on the real
+    # spectrum (nlive=50, 400 iters, seed 42) rwalk reached loglmax=-1011 in
+    # 209 s / 7422 calls vs rslice -1057 in 277 s / 10785 calls, and rwalk's
+    # covariance-adapted proposals degrade less as contours shrink
+    # (rslice fell to ~3% efficiency with 60+ calls/iter at nlive=500).
+    # Still dynesty nested sampling, still seeded. See DECISIONS.md Phase 9b.
+    sample: str = "rwalk"
 
     # Number of live points
     n_live: int = 500
@@ -154,7 +157,15 @@ def run_dynesty(
     """
     import dynesty
 
-    # Use catalog r_ref = 1.27 (WASP-39 b default)
+    from exosphere.core.logging import get_logger
+
+    log = get_logger("exosphere.retrieval")
+    log.info(
+        "retrieval start sampler=dynesty n_live=%d dlogz=%s seed=%d",
+        config.n_live,
+        config.dlogz,
+        seed,
+    )
     prior_cfg = config.prior or DEFAULT_PRIOR_CONFIG
     error_inflation = float(config.error_inflation) if config.error_inflation != "free" else 0.0
 
@@ -188,6 +199,12 @@ def run_dynesty(
     np.exp(results.logwt - results.logz[-1])
     results.logz[-1]
     results.logzerr[-1]
+    log.info(
+        "retrieval done logz=%.2f niter=%s elapsed=%.1fs",
+        float(results.logz[-1]),
+        results.niter,
+        elapsed,
+    )
 
     return RetrievalResult.from_dynesty(
         results=results,

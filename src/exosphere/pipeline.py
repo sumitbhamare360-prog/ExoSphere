@@ -27,6 +27,7 @@ from exosphere.api.db import (
     QualityReport as DBQualityReport,
 )
 from exosphere.core.config import load_config
+from exosphere.core.logging import get_logger
 from exosphere.core.spectrum import Spectrum
 from exosphere.data.exoarchive import get_planet_params
 from exosphere.forward.model import PlanetFixed
@@ -104,6 +105,7 @@ class Pipeline:
             self.progress_callback = ProgressCallback(progress_callback)
         self.state = PipelineState(analysis_id=analysis_id)
         self._start_time = time.time()
+        self.log = get_logger("exosphere.pipeline", analysis_id)
 
     def _update_progress(self, stage: str, progress: float, step: str, error: str | None = None):
         """Update pipeline progress."""
@@ -163,6 +165,7 @@ class Pipeline:
     ) -> dict:
         """Run the full analysis pipeline."""
         self.state.started_at = time.time()
+        self.log.info("pipeline start planet=%s observation=%s", planet_name, observation_ref)
         await self._update_db_status("running", "init", 0.0, "Initializing analysis")
 
         try:
@@ -223,17 +226,22 @@ class Pipeline:
             await self._finalize()
 
             self._update_progress("completed", 1.0, "Analysis completed")
+            self.log.info(
+                "pipeline completed in %.1fs", time.time() - self.state.started_at
+            )
 
             return self._build_result()
 
         except Exception as e:
             error_msg = f"Pipeline failed: {str(e)}"
+            self.log.error("pipeline failed: %s", str(e))
             self._update_progress("failed", 0.0, error_msg, str(e))
             await self._update_db_status("failed", "failed", 0.0, "Pipeline failed", str(e))
             raise
 
     def _update_progress(self, stage: str, progress: float, step: str, error: str | None = None):
         self._record_stage_time(stage)
+        self.log.info("stage=%s progress=%.2f step=%s", stage, progress, step)
         if self.progress_callback:
             self.progress_callback(stage, progress, step)
 

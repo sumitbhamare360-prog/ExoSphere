@@ -374,5 +374,61 @@ is logged here.
     first two WASP-39 b pipeline runs. Lesson: always verify
     `results.logl[i] == log_likelihood(results.samples[i])` when wiring a new
     sampler version. (Note: item 46's uniform-vs-rslice observations were made
-    on the corrupted landscape, so they do not settle the proposal debate;
-    `rslice` is retained as a working, seeded default.)
+    on the corrupted landscape, so they do not settle the proposal debate.
+    Item 50 below re-decides it on the corrected landscape with a timed
+    shootout.)
+
+50. **Proposal method: `rwalk` default (timed shootout, corrected landscape).**
+    Real spectrum, nlive=50, 400 iters, seed 42: rwalk reached loglmax=-1011
+    in 209 s / 7422 calls vs rslice -1057 in 277 s / 10785 calls. rwalk's
+    covariance-adapted proposals suit the narrow T/r_ref/abundance ridges;
+    rslice decayed to ~3% efficiency (60+ calls/iter) at nlive=500 and stalled
+    a standard run (only +220 iters in the second hour; checkpoint discarded).
+    This is a sampler-efficiency choice, not result tuning: the posterior
+    target is identical, runs stay seeded/deterministic. CI-grade EXO-000001
+    used rslice (recorded here and in PROGRESS.md).
+
+## Phase 9b (2026-10-10) — L3 real-data validation + hardening
+
+48. **L3 verdict criteria (registered BEFORE the standard-setting runs complete;**
+    **the CI-grade pilot EXO-000001 exists but L3 uses n_live=500/dlogz=0.01):**
+    - (a) Data round-trip: PASS = ingested spectrum matches the archived
+      published values point-for-point (max abs diff 0.0 at loader precision);
+      PARTIAL = agreement within quoted uncertainties only; FAIL = systematic
+      mismatch. (L1 test already proves the loader path; rechecked on the file.)
+    - (b) Molecules (fixed item-41 thresholds; literature expects strong H2O +
+      CO2, SO2 near 4.0 um, CO present, CH4 absent): PASS = H2O and CO2
+      supported (ln B >= 5) with GOOD/LIMITED ratings, CH4 not constrained, no
+      claim against a POOR rating; PARTIAL = H2O/CO2 supported but CH4
+      ambiguous (1 < ln B < 5) or one expected molecule only weakly supported;
+      FAIL = H2O or CO2 not constrained, CH4 claimed supported, or any claim
+      against a POOR rating. SO2/CO verdicts either way must be reported
+      without overclaim.
+    - (c) Parameter ranges vs published (T, abundances, cloud): PASS = T
+      posterior overlaps the literature range, abundances within 2 dex of
+      published values, cloud-constraint direction agrees; PARTIAL = T overlap
+      only; FAIL = no overlap anywhere. A model-complexity explanation paragraph
+      (isothermal/constant-abundance/5-gas mock vs published complex
+      retrievals) is MANDATORY in all cases; agreement must never be forced by
+      tuning (any setting change is logged with before/after records).
+    - (d) Fit quality: PASS = reduced chi2 < 3 with no >5-sigma structured
+      residuals over >3 adjacent bins; PARTIAL = reduced chi2 < 10 with poorly
+      fit regions documented; FAIL = reduced chi2 >= 10 or unreported.
+    - (e) ML vs retrieval: PASS = no undiscussed contradiction and mandatory ML
+      labels present (test-enforced); PARTIAL = contradiction present but
+      discussed as domain gap; FAIL = undiscussed contradiction or missing labels.
+    - Seed stability (2-3 standard seeds): PASS = medians within mutual 68%
+      CIs; PARTIAL = within 95% CIs; FAIL otherwise.
+
+49. **L3 compute scoping (registered before standard runs; amended on evidence).**
+    Mains were specified at n_live=500, but measured pace collapsed (2.6
+    iters/min and decaying at iter ~7400: bound-refit overhead superlinear in
+    nlive dominates; ~99% of wall time outside the likelihood). n_live=500
+    mains are infeasible on this (thermally throttled) box. Adjusted to
+    n_live=200/dlogz=0.01 for the three L3 mains: identical methodology,
+    production-grade precision (logz err ~0.5), errors reported; CI-grade
+    (n_live=50) EXO-000001 serves as cross-check. This is a feasibility
+    adjustment, not result tuning: it cannot favor any scientific outcome.
+    Nested detection stays n_live=100/dlogz=0.1 for seed 42 (seed 123 nested
+    as contingency). Full-nlive-500 nested everywhere is infeasible (~100 h);
+    noted as a limitation, not a silent cut.
