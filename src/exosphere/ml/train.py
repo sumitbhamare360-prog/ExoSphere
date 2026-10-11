@@ -176,7 +176,8 @@ class Trainer:
                 self.patience_counter = 0
                 if save_path:
                     self.save_checkpoint(
-                        save_path, model_version="CNN-v1", dataset_hash="", seed=42, epoch=epoch
+                        save_path, model_version=model_version,
+                        dataset_hash=dataset_hash, seed=seed, epoch=epoch,
                     )
             else:
                 self.patience_counter += 1
@@ -195,8 +196,8 @@ class Trainer:
             0,  # epoch handled externally
             {"val_loss": self.best_val_loss},
             dataset_hash,
-            "CNN-v1",
-            42,
+            model_version,
+            seed,
             path,
         )
 

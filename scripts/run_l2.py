@@ -163,6 +163,7 @@ def run_l2_validation(
     full: bool = False,
     seeds: list[int] | None = None,
     run_detection: bool = False,
+    only: str = "",
 ) -> list[dict[str, Any]]:
     """Run full L2 validation suite."""
     fixed = PlanetFixed(gravity_m_s2=4.2, stellar_radius_rsun=0.93, reference_pressure_bar=0.01)
@@ -193,8 +194,10 @@ def run_l2_validation(
         params = ModelParams(**{**base_params, **case_params})
         for noise_name, noise_mult in noise_levels:
             for seed in test_seeds:
-                print(f"Running: {case_name} | {noise_name} | seed={seed}")
                 test_name = f"{case_name}_{noise_name}_seed{seed}"
+                if only and only not in test_name:
+                    continue
+                print(f"Running: {case_name} | {noise_name} | seed={seed}", flush=True)
                 result = run_single_test(
                     test_name,
                     params,
@@ -282,6 +285,11 @@ def main():
         help="Nested-model ln B per case (5 extra retrievals each; slow)",
     )
     parser.add_argument(
+        "--only",
+        default="",
+        help="Only run cases whose test name contains this substring (resume chunks)",
+    )
+    parser.add_argument(
         "--output", type=str, default="outputs/l2_results.md", help="Output markdown file"
     )
     args = parser.parse_args()
@@ -299,7 +307,8 @@ def main():
     print("Starting L2 synthetic validation...")
     start = time.time()
     results = run_l2_validation(
-        sampler_config, full=args.full, seeds=args.seeds, run_detection=args.run_detection
+        sampler_config, full=args.full, seeds=args.seeds,
+        run_detection=args.run_detection, only=args.only,
     )
     total_time = time.time() - start
 

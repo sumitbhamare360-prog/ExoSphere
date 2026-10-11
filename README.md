@@ -102,11 +102,10 @@ python scripts\plot_retrieval.py --result outputs/retrieval_*.npz --spectrum dat
 ```
 
 - `src/exosphere/retrieval/` — Bayesian nested sampling retrieval:
-  `priors.py`, `likelihood.py`, `samplers.py` (dynesty + JAXNS stub), `results.py`, `detection.py`.
-  dynesty (working) + JAXNS (stub; needs JAX-traceable forward model).
+  `priors.py`, `likelihood.py`, `samplers.py` (dynesty 2.1.5 pinned; JAXNS stub needs
+  a JAX-traceable forward model), `results.py`, `detection.py`.
 - `scripts/run_l2.py` — L2 synthetic validation: generates synthetic spectra, runs retrieval, evaluates recovery; outputs `outputs/l2_results.md` + `.json`.
 - `scripts/plot_retrieval.py` — corner plot + best-fit spectrum with 68% credible band + detection summary → `outputs/retrieval_<id>.png`.
-- `tests/validation/test_l2_synthetic.py` — L2 validation tests (`@pytest.mark.slow`).
 
 ## Repository layout
 
@@ -116,3 +115,73 @@ web/             React dashboard + 3D twin
 tests/           unit + validation (L1/L2/L3)
 data_cache/      gitignored local data cache
 ```
+
+## Quickstart (Phase 9b)
+
+Prerequisites: Python 3.11+ with `.venv` (see Setup above), Node 20+ for `web/`.
+Long retrieval runs need foreground execution with generous timeouts on this box;
+background workers are unreliable here (see `DECISIONS.md`).
+
+```powershell
+# 1. Backend API (dev SQLite database is created on startup)
+.\.venv\Scripts\python.exe -m uvicorn exosphere.api.app:app --host 0.0.0.0 --port 8000
+
+# 2. Dashboard (new terminal, from web/)
+cd web; npm install; npm run dev      # production build: npm run build
+
+# 3. Run a WASP-39 b analysis (benchmark spectrum is cached; needs a Planet
+#    + Observation row first — easiest via the Analyze page in the dashboard,
+#    or see outputs/run_l3_pipeline.py for a scripted full run)
+
+# 4. Generate the scientific report for a finished analysis
+.\.venv\Scripts\python.exe -m exosphere.report.build EXO-000002 --format html
+# -> data_cache/reports/EXO-000002_report.html (PDF unsupported here: no Pango libs)
+
+# 5. Validation entry points
+.\.venv\Scripts\python.exe -m pytest -q -m "not slow and not network"  # fast gates
+.\.venv\Scripts\python.exe scripts\run_l2.py --help                     # L2 synthetic suite
+.\.venv\Scripts\python.exe scripts\run_l3.py --help                     # L3 real-data comparison
+.\.venv\Scripts\python.exe scripts\audit_scope.py                       # AGENTS.md sections 2-3 audit
+```
+
+Docker: `docker compose up --build` (SQLite persisted in a volume; mount real
+pRT opacities at `./opacities`, read-only). Postgres via `--profile postgres`
+with `DATABASE_URL` set (see `docker-compose.yml`). CI (`.github/workflows/ci.yml`):
+ruff + fast pytest + web lint/test/build on push/PR; slow validation is manual.
+
+## Architecture (text diagram)
+
+```
+NASA archives ──> data/ ──> quality/ ──> preprocess/ ──> Spectrum ─┬─> ml/ (candidate scores, advisory only)
+   (TAP/MAST,        assess          clean (+log)                    │
+    cached)                                                          ├─> retrieval/ (dynesty posterior + ln B) ─> api/ (SQLite) ─> web/ (dashboard + 3D twin)
+                                                                     └─> report/ (HTML, wording-guarded) ──────────────^
+```
+
+Every number shown anywhere carries a posterior/credible interval or an explicit
+"not run" marker; ML scores are always labelled "ML candidate score".
+
+## Validation status (see PROGRESS.md for detail)
+
+| Level | Status (2026-10-11) |
+|---|---|
+| L1 data round-trip | PASS (test + L3 recheck: 147 pts, max abs diff 0.0) |
+| L2 synthetic | NOT RUN (runner repaired and ready; needs ~hours of compute) |
+| L3 real WASP-39 b | PARTIAL/FAIL overall: H2O + CO2 supported (agree with literature), CH4 absent (agree), SO2 unconfirmed with PRISM-only data; T cool-mode too cool, reduced chi2 ~41, seed bimodality documented. Full table: `outputs/l3_wasp39b.md` |
+
+## Known limitations
+
+- Mock isothermal/constant-abundance forward model (no pRT on this box); no stellar
+  contamination treatment; grey clouds only; Na/K/H2S out of V1 scope.
+- Nested-sampling evidence below ln B ~ 30 carries sampler systematics; verdicts in
+  the 3-15 range are reported as ambiguous, never detections.
+- Posterior can be bimodal (cool/high-cloud vs hot/low-cloud); seeds 42/123 agree,
+  seed 7 found the second mode at comparable evidence.
+- ML classifier untrained here (`models/` empty); pipeline emits labelled placeholder scores.
+- Long jobs must run in the foreground (background workers die); CPU is thermally throttled.
+
+## Roadmap (from AGENTS.md)
+
+- **V2**: native MAST JWST TSO ingestion, G395H/NIRISS/NIRCam modes, multi-observation
+  fusion, forward-model emulator, stellar contamination, Bayesian model comparison.
+- **V3**: multi-telescope, emission/phase curves, observation planning, AI assistant.

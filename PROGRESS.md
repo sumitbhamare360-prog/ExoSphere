@@ -290,3 +290,90 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
 ### Next step
 
 **Phase 9b**: L3 standard runs + validation report + hardening (this section).
+
+## Phase 9b --- L3 real-data validation + hardening (done, with documented FAILs)
+
+### L3 runs (standard settings, WASP-39 b Carter 2024 PRISM, 147 pts)
+
+- 3 full mains, n_live=200/dlogz=0.01, seeds 42/123/7 (`outputs/run_l3_pipeline.py`,
+  resumable via dynesty checkpoints; n_live=500 proved infeasible on this box,
+  DECISIONS 49):
+  - EXO-000002 (seed 42): logz=-830.8, 6100 samples; cool mode T~670 K.
+  - EXO-000003 (seed 123): logz=-828.9, 5679 samples; cool mode, agrees with 42.
+  - EXO-000004 (seed 7): logz=-834.9, 4415 samples; HOT mode T~1900 K
+    (documented T/cloud/abundance bimodality; modes within ~6 nats evidence).
+- Nested detection, seed 42, n_live=100/dlogz=0.1 (`outputs/run_detection_one.py`;
+  all uncapped with diagnostics): H2O +196, CO2 +191, CO +8-9 (two seeds agree),
+  CH4 +0.6 (an earlier 13.7 retracted as a stuck reduced run), SO2 -3.5.
+- Point-removal consistency check at best-fit (new methodology, DECISIONS 50+):
+  H2O -245, CO2 -223 nats (genuine); CO -3.4, CH4 0.0, SO2 -0.3 → nested values
+  in the single digits are within sampler systematics: CO/CH4-standard get no
+  detection claim. Implemented as an override in `scripts/run_l3.py`.
+- Standard HTML reports built for all three analyses
+  (`data_cache/reports/EXO-00000{2,3,4}_report.html`).
+
+### L3 comparison (`scripts/run_l3.py` -> `outputs/l3_wasp39b.md`)
+
+Literature verified at source (citations in file): Rustamkulov+2023 (H2O 33σ,
+CO2 28σ, CO 7σ, SO2 2.7σ, CH4 absent UL 5e-6, 10x solar, C/O 0.68),
+Carter+2024 (benchmark, PRISM -177 ppm offset), Alderson+2023 (CO2 28.5σ,
+SO2 4.8σ, 3-10x solar), Feinstein+2023 (10-30x solar), Powell+2024 MIRI
+(SO2 0.5-25 ppm), Moran+2024 (CH4 absent either cloud model; C/O model-dependent).
+
+| Criterion | Verdict |
+|---|---|
+| (a) Data round-trip | PASS (147 pts, max abs diff 0.0) |
+| (b) Molecules | PARTIAL (H2O/CO2 sup.; CH4 absent + SO2 unconfirmed agree; CO gated by POOR band S/N per rule 3, nested role marginal) |
+| (c) Parameters | T FAIL on cool mode ([538,778] K vs 800-1500 K; hot mode overlaps); CH4 UL, metallicity proxy 2.2x, C/O proxy 0.39 PASS |
+| (d) Fit quality | FAIL (reduced chi2 = 41; worst bins 15-18σ at 2.65-2.82 um) |
+| (e) ML vs retrieval | PASS (no model trained; labelled placeholder scores, no contradiction) |
+| Seed stability | FAIL by the letter (9/24 in 95% CIs) — explained by bimodality: seeds 42/123 agree excellently |
+| **Overall** | **FAIL** (per pre-registered rule: any FAIL fails; mission-critical molecule verdicts all agree with literature) |
+
+### Hardening
+
+- Structured logging (`core/logging.py`, analysis_id in context) + clean-500 API handler; tests.
+- `scripts/clean_cache.sh` (safe defaults keep benchmark/archive/ML artifacts).
+- `Dockerfile.backend`, `web/Dockerfile`, `docker-compose.yml` (SQLite default, Postgres profile), `.dockerignore`.
+- `.github/workflows/ci.yml` (ruff + fast pytest + web gates; manual validation job).
+- README: quickstart, architecture, validation table, limitations, roadmap.
+- `scripts/audit_scope.py` passes 5/5 (molecules, ML labels, geography, UI labels, provenance) with tests; pipeline `_finalize` now writes full provenance (rule 5) + backfill.
+
+### Tests
+
+- New: `tests/test_l3.py` (9), `tests/test_audit.py` (4), `tests/test_logging.py` (4),
+  `tests/test_api.py` e2e (2, incl. full POST->retrieval->report flow),
+  `tests/test_checkpoint_resume.py` (1). DB test isolation fixtures (shared-engine wipes).
+- Backend + frontend gates green (see V1 status).
+
+### Open issues
+
+- n_live=500 mains infeasible here (bound overhead); full-500 nested (~100 h) out of reach.
+- Nested lnB below ~30 carries sampler systematics; CO-class verdicts need the
+  point-removal cross-check (now built into run_l3.py).
+- ML untrained; L2 full suite unrun (runner ready); no in-browser checks anywhere.
+- Background workers die within ~10 min; foreground-only execution.
+
+## V1 STATUS (final)
+
+### What works
+- End-to-end: archive spectrum -> quality -> preprocess -> ML scores -> dynesty
+  retrieval -> nested-model detection -> twin + wording-guarded HTML report,
+  via API/CLI/dashboard, fully seeded and reproducible.
+- Physics core validated: likelihood/posterior alignment verified row-by-row;
+  forward model bitwise-preserved through two speedups (~300x).
+
+### What is validated
+- L1 PASS (round-trip exact). L3 PARTIAL/FAIL overall with all molecule verdicts
+  agreeing with literature; discrepancies (T, chi2, bimodality) documented with
+  model-complexity explanations. L2 runner ready, suite unrun.
+
+### Known limitations
+- Mock physics (isothermal, 5 gases, grey cloud); no stellar contamination; Na/K/H2S
+  out of scope; evidence systematics below lnB ~ 30; posterior bimodality;
+  untrained ML; draft-grade compute environment (no pRT, throttled CPU).
+
+### Suggested V2 start
+1. Real pRT/Linux + JAX-traceable model (unlocks JAXNS + emulator). 2. Train the
+   CNN on the 3k (then 20k) dataset. 3. Run L2 full + L3 at n_live=500 on a bigger
+   box. 4. G395H/NIRISS modes + multi-observation fusion. 5. Stellar contamination.

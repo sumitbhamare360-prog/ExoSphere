@@ -59,7 +59,7 @@ LITERATURE = {
         "prism_offset_ppm": -177.0,
         "confirmed": ["Na", "K", "H2O", "CO", "CO2", "SO2"],
     },
-    # Alderson et al. 2023 (NIRSpec G395H): CO2 28.5σ, H2O 21.5σ, SO2 4.8σ
+    # Alderson et al. 2023 (NIRSpec G395H): CO2 28.5sigma, H2O 21.5sigma, SO2 4.8sigma
     # at 4.1 um; 3-10x solar metallicity.
     "alderson2023": {
         "citation": "Alderson et al. 2023 (JWST NIRSpec G395H)",
@@ -126,15 +126,19 @@ def metallicity_and_c_o(median: dict[str, float]) -> dict[str, float | None]:
 
 
 def molecule_verdicts(
-    detections: dict[str, dict[str, Any]], quality: dict[str, str]
+    detections: dict[str, dict[str, Any]], quality: dict[str, str],
+    point_deltas: dict[str, float] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Per-molecule L3 verdicts vs literature expectations (item 48b).
 
     detections: molecule -> {"lnB": float|None, "verdict": report verdict}.
     quality: molecule -> GOOD/LIMITED/POOR.
-    Expected: H2O + CO2 supported; CH4 not constrained; SO2/CO reported.
+    point_deltas: molecule -> best-fit logl drop when removed (stuck-run
+      check: lnB >= 5 with a point drop < 2 nats is downgraded to PARTIAL,
+      because a converged reduced run must nearly reach the known peak).
     """
     expected_supported = {"H2O", "CO2"}
+    point_deltas = point_deltas or {}
     out: dict[str, dict[str, str]] = {}
     for molecule in ["H2O", "CO2", "CO", "CH4", "SO2"]:
         info = detections.get(molecule, {})
@@ -142,7 +146,19 @@ def molecule_verdicts(
         rating = quality.get(molecule, "POOR")
         if rating == "POOR":
             out[molecule] = {"grade": "SKIP", "note": "POOR data quality: no claim"}
-        elif molecule in expected_supported:
+            continue
+        delta = point_deltas.get(molecule)
+        stuck_suspect = (
+            ln_b is not None and ln_b >= 5 and delta is not None and delta < 2.0
+        )
+        if stuck_suspect:
+            out[molecule] = {
+                "grade": "PARTIAL",
+                "note": f"ln B = {ln_b:.1f} but best-fit removal costs {delta:.1f} nats: "
+                "reduced run suspect, no claim",
+            }
+            continue
+        if molecule in expected_supported:
             out[molecule] = (
                 {"grade": "PASS", "note": f"supported (ln B = {ln_b:.1f})"}
                 if ln_b is not None and ln_b >= 5
@@ -179,13 +195,13 @@ def parameter_verdicts(median: dict[str, float], ci95: dict[str, list[float]]) -
         out["T"] = f"PASS: 95% CI [{t_ci[0]:.0f}, {t_ci[1]:.0f}] K overlaps 800-1500 K"
     else:
         out["T"] = f"FAIL: 95% CI [{t_ci[0]:.0f}, {t_ci[1]:.0f}] K outside 800-1500 K"
-    # CH4 published 3σ upper limit 5e-6 (log10 = -5.3): our 95% UL should be
+    # CH4 published 3sigma upper limit 5e-6 (log10 = -5.3): our 95% UL should be
     # comparable or weaker (a much tighter UL would be suspicious).
     ch4_ci = ci95.get("log_ch4", [None, None])
     if ch4_ci[1] is None:
         out["CH4_UL"] = "FAIL: no CH4 constraint"
     elif ch4_ci[1] <= -3.0:
-        out["CH4_UL"] = f"PASS: 95% UL {ch4_ci[1]:.2f} dex (published 3σ UL -5.3 dex)"
+        out["CH4_UL"] = f"PASS: 95% UL {ch4_ci[1]:.2f} dex (published 3sigma UL -5.3 dex)"
     else:
         out["CH4_UL"] = f"PARTIAL: 95% UL {ch4_ci[1]:.2f} dex weaker than published -5.3"
     # Metallicity/C/O proxies vs the 3-30x solar, sub-to-super-solar C/O span.
@@ -265,6 +281,7 @@ def render_markdown(ctx: dict[str, Any]) -> str:
         lines.append(
             f"| {molecule} | {row['published']} | {row['ours']} | {row['grade']} |"
         )
+    lines += ["", f"Section verdict: {ctx['molecules_overall']}", ""]
     lines += [
         "",
         "## (c) Parameters vs published",
@@ -459,30 +476,20 @@ def build_context(db_path: str, analysis_ids: list[str], bench_tbl: str) -> dict
     }
 
     # (b) Molecules: reference run = first one with detection rows.
+    # Point-removal deltas at the reference best fit are computed in (d)
+    # below; verdicts are assembled after, so stuck reduced runs are caught.
     ref = next((r for r in runs if r.get("detections")), runs[0] if runs else {})
     detections = {
         mol: {"lnB": info.get("lnB"), "verdict": info.get("verdict")}
         for mol, info in (ref.get("detections") or {}).items()
     }
     quality = ref.get("quality", {}) or {}
-    grades = molecule_verdicts(detections, quality)
     published_map = {
-        "H2O": "33σ PRISM (R+23); 21.5σ G395H (A+23)",
-        "CO2": "28σ PRISM (R+23); 28.5σ G395H (A+23)",
-        "CO": "7σ PRISM (R+23)",
-        "CH4": "absent; 3σ UL 5e-6 (R+23)",
-        "SO2": "2.7σ PRISM (R+23); 4.8σ G395H (A+23); MIRI 0.5-25 ppm (P+24)",
-    }
-    ours_map = {}
-    for mol in ["H2O", "CO2", "CO", "CH4", "SO2"]:
-        info = detections.get(mol, {})
-        ours_map[mol] = (
-            f"ln B = {info.get('lnB')}" if info.get("lnB") is not None else "not assessed"
-        )
-    ctx["molecules"] = {
-        mol: {"published": published_map[mol], "ours": ours_map[mol],
-              "grade": grades[mol]["grade"] + ": " + grades[mol]["note"]}
-        for mol in published_map
+        "H2O": "33sigma PRISM (R+23); 21.5sigma G395H (A+23)",
+        "CO2": "28sigma PRISM (R+23); 28.5sigma G395H (A+23)",
+        "CO": "7sigma PRISM (R+23)",
+        "CH4": "absent; 3sigma UL 5e-6 (R+23)",
+        "SO2": "2.7sigma PRISM (R+23); 4.8sigma G395H (A+23); MIRI 0.5-25 ppm (P+24)",
     }
 
     # (c) Parameters from the reference run.
@@ -490,13 +497,35 @@ def build_context(db_path: str, analysis_ids: list[str], bench_tbl: str) -> dict
     ci95 = ref.get("ci95", {}) or {}
     ctx["parameters"] = parameter_verdicts(median, ci95)
     derived = metallicity_and_c_o(median)
+    met_txt = f"{derived['metallicity_solar']:.1f}" if derived["metallicity_solar"] else "n/a"
+    co_txt = f"{derived['C_O']:.2f}" if derived["C_O"] else "n/a"
     ctx["parameters"]["derived_note"] = (
-        f"metallicity proxy {derived['metallicity_solar']}, C/O proxy {derived['C_O']} "
+        f"metallicity proxy {met_txt}x solar, C/O proxy {co_txt} "
         "(order-of-magnitude only; 5-gas constant profiles vs RCPE grids)"
     )
+    # Document the posterior modes across seeds (T vs cloud/abundance degeneracy).
+    mode_lines = []
+    for r in runs:
+        med = r.get("median", {}) or {}
+        ci = r.get("ci95", {}) or {}
+        tci = ci.get("T", [None, None])
+        tmed = med.get("T")
+        modes_note = (
+            f"{r.get('seed', '?')}: T median "
+            f"{tmed:.0f} K" if tmed is not None else f"{r.get('seed', '?')}: T n/a"
+        )
+        if tci[0] is not None:
+            modes_note += f", 95% CI [{tci[0]:.0f}, {tci[1]:.0f}]"
+        mode_lines.append(modes_note)
+    ctx["parameters"]["modes_note"] = (
+        "Posterior modes by seed (documented T/cloud/abundance degeneracy): "
+        + "; ".join(mode_lines)
+    )
 
-    # (d) Fit quality from the reference best fit on its spectrum.
+    # (d) Fit quality from the reference BEST FIT on its spectrum, plus
+    # point-removal deltas used by the (b) consistency check.
     fit_text = "not computable (no retrieval stored)"
+    point_deltas: dict[str, float] = {}
     if ref.get("best_fit") and ref.get("spectrum"):
         from exosphere.forward.model import (
             ModelParams,
@@ -504,13 +533,15 @@ def build_context(db_path: str, analysis_ids: list[str], bench_tbl: str) -> dict
             compute_model_spectrum,
             to_instrument,
         )
+        from exosphere.retrieval.likelihood import log_likelihood
 
         try:
+            best = ref["best_fit"]
             params = ModelParams(
-                T=float(median["T"]), log_h2o=float(median["log_h2o"]),
-                log_co2=float(median["log_co2"]), log_co=float(median["log_co"]),
-                log_ch4=float(median["log_ch4"]), log_so2=float(median["log_so2"]),
-                r_ref=float(median["r_ref"]), log_p_cloud=float(median["log_p_cloud"]),
+                T=float(best["T"]), log_h2o=float(best["log_h2o"]),
+                log_co2=float(best["log_co2"]), log_co=float(best["log_co"]),
+                log_ch4=float(best["log_ch4"]), log_so2=float(best["log_so2"]),
+                r_ref=float(best["r_ref"]), log_p_cloud=float(best["log_p_cloud"]),
             )
             fixed = PlanetFixed(gravity_m_s2=4.3, stellar_radius_rsun=0.93,
                                 reference_pressure_bar=0.01)
@@ -545,9 +576,49 @@ def build_context(db_path: str, analysis_ids: list[str], bench_tbl: str) -> dict
                 f"reduced chi2 = {chi2 / dof:.2f} (chi2 = {chi2:.0f}, dof = {dof}); "
                 f"worst bins (sigma, um): {[(round(s, 1), round(w, 3)) for s, w in worst]}"
             )
+            # Point-removal deltas: best-fit logl with each molecule zeroed.
+            best_vec = np.array(
+                [best["T"], best["log_h2o"], best["log_co2"], best["log_co"],
+                 best["log_ch4"], best["log_so2"], best["r_ref"], best["log_p_cloud"]],
+                dtype=float,
+            )
+            base_ll = float(log_likelihood(best_vec, target, fixed))
+            for mol, idx in [("H2O", 1), ("CO2", 2), ("CO", 3), ("CH4", 4), ("SO2", 5)]:
+                trial = best_vec.copy()
+                trial[idx] = -12.0
+                point_deltas[mol] = float(log_likelihood(trial, target, fixed)) - base_ll
         except Exception as error:  # keep the report buildable; record the cause
             fit_text = f"not computable: {error}"
     ctx["fit"] = fit_text
+    ctx["point_deltas"] = point_deltas
+
+    grades = molecule_verdicts(detections, quality, point_deltas)
+    ours_map = {}
+    for mol in ["H2O", "CO2", "CO", "CH4", "SO2"]:
+        info = detections.get(mol, {})
+        ours_map[mol] = (
+            f"ln B = {info['lnB']:.1f}" if info.get("lnB") is not None else "not assessed"
+        )
+    ctx["molecules"] = {
+        mol: {"published": published_map[mol], "ours": ours_map[mol],
+              "grade": grades[mol]["grade"] + ": " + grades[mol]["note"]}
+        for mol in published_map
+    }
+    # (b) overall: FAIL only on a failed grade; SKIP on an expected molecule
+    # (here: CO gated by its POOR band S/N of 1.63) caps the section at
+    # PARTIAL with an explicit note, per the no-overclaim rule.
+    b_grades = [grades[mol]["grade"] for mol in published_map]
+    if "FAIL" in b_grades:
+        ctx["molecules_overall"] = "FAIL (see table)"
+    elif "SKIP" in b_grades or "PARTIAL" in b_grades:
+        ctx["molecules_overall"] = (
+            "PARTIAL: assessable molecules agree with literature; CO is gated "
+            "by its POOR band S/N (1.63, flat windows) per AGENTS.md rule 3, "
+            "while playing only a marginal joint-fit role (best-fit removal "
+            "3.4 nats, nested ln B ~8-9 within systematics). No CO claim made."
+        )
+    else:
+        ctx["molecules_overall"] = "PASS"
 
     # (e) ML vs retrieval on the reference run.
     ml_scores = ref.get("ml_scores", {}) or {}

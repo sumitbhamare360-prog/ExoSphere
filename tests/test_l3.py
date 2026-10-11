@@ -68,6 +68,18 @@ def test_molecule_verdicts_ch4_claim_fails():
     assert verdicts["CH4"]["grade"] == "FAIL"
 
 
+def test_molecule_verdicts_stuck_run_override():
+    """lnB >= 5 with a <2-nat point-removal cost is downgraded (stuck reduced run)."""
+    verdicts = molecule_verdicts(
+        {"CO": {"lnB": 8.1}, "H2O": {"lnB": 196.0}},
+        {"CO": "GOOD", "H2O": "GOOD"},
+        point_deltas={"CO": 0.4, "H2O": 245.0},
+    )
+    assert verdicts["CO"]["grade"] == "PARTIAL"
+    assert "no claim" in verdicts["CO"]["note"]
+    assert verdicts["H2O"]["grade"] == "PASS"
+
+
 def test_parameter_verdicts():
     median = {"T": 1100.0, "log_ch4": -6.0, "log_h2o": -3.0, "log_co2": -3.5,
               "log_co": -5.0, "log_so2": -6.0}
@@ -102,8 +114,9 @@ def test_render_markdown_has_all_sections():
         "analyses": ["EXO-000002"],
         "roundtrip": "PASS: ...",
         "molecules": {
-            "H2O": {"published": "33σ", "ours": "ln B = 172", "grade": "PASS: x"},
+            "H2O": {"published": "33sigma", "ours": "ln B = 172", "grade": "PASS: x"},
         },
+        "molecules_overall": "PARTIAL: ...",
         "parameters": {"T": "PASS: ..."},
         "fit": "reduced chi2 = 2.0",
         "ml": "no contradiction",
