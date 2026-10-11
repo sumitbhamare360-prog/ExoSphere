@@ -432,3 +432,40 @@ is logged here.
     Nested detection stays n_live=100/dlogz=0.1 for seed 42 (seed 123 nested
     as contingency). Full-nlive-500 nested everywhere is infeasible (~100 h);
     noted as a limitation, not a silent cut.
+
+50. **Proposal method: `rwalk` default (timed shootout, corrected landscape).**
+    Real spectrum, nlive=50, 400 iters, seed 42: rwalk reached loglmax=-1011
+    in 209 s / 7422 calls vs rslice -1057 in 277 s / 10785 calls. rwalk's
+    covariance-adapted proposals suit the narrow T/r_ref/abundance ridges;
+    rslice decayed to ~3% efficiency (60+ calls/iter) at nlive=500 and stalled
+    a standard run. Sampler-efficiency choice, not result tuning; runs stay
+    seeded/deterministic. CI-grade EXO-000001 used rslice (recorded).
+
+51. **Capped runs are invalid evidence.** An L2 fast subset at maxcall=20000
+    recovered 1/8 and 0/8 params in 95% CI; the same cases at maxcall=60000
+    recover 8/8. dynesty's dlogz also misfires on flat plateaus (it measures
+    live-point spread, not distance to the peak). Rule: a retrieval or nested
+    run that hit maxcall/maxiter, or whose reduced logZ sits far below the
+    point-removal-implied peak, is unconverged — its numbers are not results.
+    Every nested result now carries diagnostics (niter/ncall/capped/reduced
+    logZ) in details_json.
+52. **Point-removal consistency check for nested evidence.** ln B >= 5 with a
+    best-fit removal cost < 2 nats means the reduced run missed a provably
+    reachable peak: verdict downgraded to AMBIGUOUS, no claim. This retracted
+    two artifacts (CO ln B = 167, CH4 ln B = 13.7; fresh runs give -8.2 and
+    +0.6). Implemented in scripts/run_l3.py. Hundred-nat margins (H2O/CO2)
+    are unaffected. Sampler systematics below ln B ~ 30 are real; verdicts in
+    the 3-15 range are never detections.
+53. **L2 outcome (2026-10-11).** 24/24 recovery runs (4 cases x 2 noise x
+    3 seeds, PRISM grid, benchmark-like noise): every parameter >= 88% in 95%
+    CI (tolerance >= 80%); 20/24 runs recover all 8. Detection: present H2O
+    +743, CO2 +175; absent CO +1.66/-1.26, CH4 +0.70/-3.31, SO2 +3.02/-2.06
+    across two seeds — 5/6 clean negatives plus one borderline (+3.02, noise
+    fluctuation, not systematic). PASS with noted borderline.
+54. **ML training outcome (2026-10-11, honest failure).** 3000 spectra
+    (6x500 chunks, seeds 42-47) + CNN to early stop (epoch 13): test AUC
+    0.40-0.59 (chance), ECE 0.55-0.80, H2O recall 1.0 at precision 0.19. The
+    model learned essentially nothing; artifacts saved as CNN-v1 with metrics
+    (`models/`). Real-spectrum scores flat (~0.15-0.25, undifferentiated).
+    Cause under investigation (data scale? architecture?); V2 work. The
+    pipeline's placeholder-score path remains correct behavior without a model.

@@ -103,6 +103,7 @@ def run_single_test(
     seed: int,
     sampler_config: SamplerConfig,
     run_detection: bool = False,
+    molecules: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run retrieval on a single synthetic spectrum and evaluate recovery."""
     start = time.time()
@@ -141,7 +142,9 @@ def run_single_test(
     # Skipped by default: 5 extra retrievals per case (use --run-detection).
     det_summary: dict[str, Any] = {}
     if run_detection:
-        det_summary = detection_summary(result, spectrum, fixed, sampler_config, seed)
+        det_summary = detection_summary(
+            result, spectrum, fixed, sampler_config, seed, molecules=molecules
+        )
 
     return {
         "name": name,
@@ -164,6 +167,7 @@ def run_l2_validation(
     seeds: list[int] | None = None,
     run_detection: bool = False,
     only: str = "",
+    molecules: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run full L2 validation suite."""
     fixed = PlanetFixed(gravity_m_s2=4.2, stellar_radius_rsun=0.93, reference_pressure_bar=0.01)
@@ -206,6 +210,7 @@ def run_l2_validation(
                     seed=seed,
                     sampler_config=sampler_config,
                     run_detection=run_detection,
+                    molecules=molecules,
                 )
                 result["case"] = case_name
                 result["noise_level"] = noise_name
@@ -290,6 +295,12 @@ def main():
         help="Only run cases whose test name contains this substring (resume chunks)",
     )
     parser.add_argument(
+        "--molecules",
+        nargs="+",
+        default=None,
+        help="Limit nested detection to these molecules (e.g. --molecules SO2 CO)",
+    )
+    parser.add_argument(
         "--output", type=str, default="outputs/l2_results.md", help="Output markdown file"
     )
     args = parser.parse_args()
@@ -309,6 +320,7 @@ def main():
     results = run_l2_validation(
         sampler_config, full=args.full, seeds=args.seeds,
         run_detection=args.run_detection, only=args.only,
+        molecules=args.molecules,
     )
     total_time = time.time() - start
 

@@ -164,6 +164,43 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 
 **Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).
 
+## Phase 5 --- ML molecule classifier (model trained 2026-10-11; performance poor, honestly reported)
+
+- `src/exosphere/ml/`: `dataset.py` (synthetic spectra from forward/, label = logVMR >= -6
+  AND feature amplitude > noise, seeded, config hash), `model.py` (1D CNN: 4 conv blocks
+  [32,64,128,256] + GAP + dense(128) + sigmoid(5); BCE, Adam 1e-3), `train.py`
+  (early stopping patience 10, checkpoint with model/dataset-hash/version/seed),
+  `infer.py` (`predict(spectrum)` -> MLResult, scores labelled "ML candidate score").
+- Training 2026-10-11: 3000 spectra (6x500 chunks, seeds 42-47, `data_cache/ml/chunks/`),
+  50 epochs max, early stop epoch 13. Test metrics (`models/test_metrics.json`):
+  AUC H2O 0.59, CO2 0.40, CO 0.45, CH4 0.47, SO2 0.45 (chance level); ECE 0.55-0.80;
+  precision/recall degenerate. **The model learned essentially nothing** — recorded as
+  a failure per Phase 5 orders (suspects: data scale, architecture, calibration; V2 work).
+  Artifacts: `models/best_model.pt` (CNN-v1, dataset hash `chunks6x500-seeds42-47-n3000`),
+  `training_history.json`. Real WASP-39 b scores: flat 0.15-0.25, undifferentiated,
+  consistent with a chance-level model. Pipeline placeholder-score path (no model) unchanged.
+- Tests: `tests/test_ml.py` (labels, dataset determinism, architecture, inference schema,
+  checkpointing, tiny training run).
+
+### Open issues (Phase 5)
+
+- Model quality is the top ML risk for V2 (needs scale/architecture/calibration work).
+- `Trainer.train` previously dropped dataset_hash/seed at checkpointing (fixed + backfilled).
+
+## Phase 4 (supplement, 2026-10-11) --- L2 synthetic validation: PASS
+
+- `scripts/run_l2.py` (repaired: PRISM-grid synthetics, `--run-detection`, `--only`,
+  `--molecules` for resume chunks). Full recovery suite 2026-10-11: 24 runs (4 cases x
+  2 noise x 3 seeds), n_live=50/dlogz=0.5, all converged (uncapped).
+- Per-parameter 95% CI coverage (tolerance >= 80%): T 23/24, H2O/CO2/CO/SO2/r_ref 24/24,
+  CH4 23/24, cloud 21/24 — **all PASS**; 20/24 runs recover all 8 params.
+- Detection (H2O_CO2 case, 2 seeds): present H2O +743, CO2 +175; absent CO +1.66/-1.26,
+  CH4 +0.70/-3.31, SO2 +3.02/-2.06 — 5/6 clean negatives + 1 borderline (noise, not
+  systematic). PASS with noted borderline. Merged table: `outputs/l2_results.md`
+  (+ per-seed `outputs/l2_seed{42,123,456}.md`, `outputs/l2_det{,123}.md/.json`).
+- Key lesson (DECISIONS 51): an earlier capped run (maxcall=20000) recovered 1/8 —
+  capped runs are invalid evidence, never reported as results.
+
 ## Phase 8 --- 3D scientific digital twin (done)
 
 ### What was built
@@ -282,7 +319,10 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
 
 ### Open issues (carried into Phase 9b)
 
-- Real WASP-39 b report blocked on SO2 row + converged standard retrieval.
+- ~~Real WASP-39 b report blocked on SO2 row + converged standard retrieval.~~
+  RESOLVED 2026-10-11: SO2 ln B = -9.20 (clean negative); pilot report rebuilt:
+  `data_cache/reports/EXO-000001_report.html` (summary: GOOD data, T = 1976
+  [1782, 2254] K, H2O + CO2 supported, CH4/CO/SO2 not supported, ML placeholders).
 - ML training (3000 samples + CNN) never completed; L2 suite never ran.
 - Background workers die within ~10 min in this environment; foreground chunks only.
 - Thermal throttling active; bound-refit overhead dominates at high nlive.
@@ -364,14 +404,17 @@ SO2 4.8σ, 3-10x solar), Feinstein+2023 (10-30x solar), Powell+2024 MIRI
   forward model bitwise-preserved through two speedups (~300x).
 
 ### What is validated
-- L1 PASS (round-trip exact). L3 PARTIAL/FAIL overall with all molecule verdicts
-  agreeing with literature; discrepancies (T, chi2, bimodality) documented with
-  model-complexity explanations. L2 runner ready, suite unrun.
+- L1 PASS (round-trip exact). L2 PASS (24/24 recovery runs, all params >= 88% in
+  95% CI; detection pattern correct with one documented borderline). L3
+  PARTIAL/FAIL overall with all molecule verdicts agreeing with literature;
+  discrepancies (T, chi2, bimodality) documented with model-complexity
+  explanations. ML classifier trained and honestly failed (AUC ~ chance).
 
 ### Known limitations
 - Mock physics (isothermal, 5 gases, grey cloud); no stellar contamination; Na/K/H2S
   out of scope; evidence systematics below lnB ~ 30; posterior bimodality;
-  untrained ML; draft-grade compute environment (no pRT, throttled CPU).
+  ML classifier at chance level (V2 work); draft-grade compute environment
+  (no pRT, throttled CPU).
 
 ### Suggested V2 start
 1. Real pRT/Linux + JAX-traceable model (unlocks JAXNS + emulator). 2. Train the
