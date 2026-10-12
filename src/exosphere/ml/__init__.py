@@ -12,16 +12,7 @@ from .dataset import (
     load_target_grid,
     save_dataset,
 )
-from .infer import MLClassifier, MLResult, predict_from_checkpoint, predict_from_checkpoint_batch
-from .model import (
-    MoleculeCNN,
-    count_parameters,
-    create_model,
-    load_checkpoint,
-    save_checkpoint,
-    set_seed,
-)
-from .train import Trainer, create_dataloaders, evaluate_test_set
+from .result import MLResult
 
 __all__ = [
     # dataset
@@ -50,3 +41,27 @@ __all__ = [
     "predict_from_checkpoint",
     "predict_from_checkpoint_batch",
 ]
+
+
+def __getattr__(name: str):
+    """Load optional PyTorch-backed ML helpers only when requested."""
+    if name in {"MLClassifier", "predict_from_checkpoint", "predict_from_checkpoint_batch"}:
+        from . import infer
+
+        return getattr(infer, name)
+    if name in {
+        "MoleculeCNN",
+        "count_parameters",
+        "create_model",
+        "load_checkpoint",
+        "save_checkpoint",
+        "set_seed",
+    }:
+        from . import model
+
+        return getattr(model, name)
+    if name in {"Trainer", "create_dataloaders", "evaluate_test_set"}:
+        from . import train
+
+        return getattr(train, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

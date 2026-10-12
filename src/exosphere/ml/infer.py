@@ -6,11 +6,8 @@ predict(spectrum) -> MLResult with per-molecule scores labelled
 
 from __future__ import annotations
 
-import json
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
@@ -18,79 +15,10 @@ import torch
 from exosphere.core.spectrum import Spectrum
 from exosphere.ml.dataset import MOLECULES, load_target_grid
 from exosphere.ml.model import MoleculeCNN
+from exosphere.ml.result import MLResult
 
 MODEL_VERSION = "CNN-v1"
 TRAINING_GRID_WL = None  # Will be loaded lazily
-
-
-@dataclass
-class MLResult:
-    """ML inference result with per-molecule candidate scores."""
-
-    # Per-molecule scores (0-1)
-    scores: dict[str, float]
-
-    # Provenance
-    model_version: str
-    dataset_hash: str
-    model_config_hash: str
-    timestamp: str
-
-    # Input spectrum info
-    input_coverage_fraction: float
-    input_wavelength_range: tuple[float, float]
-    grid_match: bool
-    warnings: list[str]
-
-    def __post_init__(self):
-        # Ensure scores are properly labelled
-        self.scores = {k: float(v) for k, v in self.scores.items()}
-
-    @property
-    def labelled_scores(self) -> dict[str, str]:
-        """Scores with required labelling."""
-        return {
-            k: f"{v:.4f} (ML candidate score, not abundance, not a detection)"
-            for k, v in self.scores.items()
-        }
-
-    def to_dict(self) -> dict[str, Any]:
-        """JSON-serializable dict."""
-        return {
-            "scores": self.scores,
-            "labelled_scores": self.labelled_scores,
-            "model_version": self.model_version,
-            "dataset_hash": self.dataset_hash,
-            "model_config_hash": self.model_config_hash,
-            "timestamp": self.timestamp,
-            "input_coverage_fraction": self.input_coverage_fraction,
-            "input_wavelength_range": self.input_wavelength_range,
-            "grid_match": self.grid_match,
-            "warnings": self.warnings,
-        }
-
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2)
-
-    def summary_text(self) -> str:
-        lines = [
-            f"ML Inference Result ({self.model_version})",
-            f"Timestamp: {self.timestamp}",
-            f"Dataset hash: {self.dataset_hash[:8]}...",
-            f"Grid match: {self.grid_match}",
-            f"Input coverage: {self.input_coverage_fraction:.2%}",
-            f"Input range: {self.input_wavelength_range[0]:.3f}"
-            f"-{self.input_wavelength_range[1]:.3f} µm",
-            "",
-            "Per-molecule ML candidate scores (NOT abundance, NOT a detection):",
-        ]
-        for mol, score in self.scores.items():
-            lines.append(f"  {mol:4s}: {score:.4f}")
-        if self.warnings:
-            lines.append("\nWarnings:")
-            for w in self.warnings:
-                lines.append(f"  - {w}")
-        return "\n".join(lines)
 
 
 class MLClassifier:

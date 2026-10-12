@@ -31,7 +31,6 @@ from exosphere.core.logging import get_logger
 from exosphere.core.spectrum import Spectrum
 from exosphere.data.exoarchive import get_planet_params
 from exosphere.forward.model import PlanetFixed
-from exosphere.ml.infer import MLClassifier
 from exosphere.preprocess.clean import CleanOptions, clean
 from exosphere.quality.assess import assess
 from exosphere.retrieval.detection import detection_summary
@@ -331,13 +330,13 @@ class Pipeline:
 
     async def _run_ml_inference(self, spectrum: Any) -> Any:
         """Run ML inference."""
+        from exosphere.ml.result import MLResult
+
         # Find model checkpoint
         model_dir = Path("models")
         checkpoints = list(model_dir.glob("*.pt"))
         if not checkpoints:
             # Return mock result if no model
-            from exosphere.ml.infer import MLResult
-
             return MLResult(
                 scores={mol: 0.0 for mol in ["H2O", "CO2", "CO", "CH4", "SO2"]},
                 model_version="CNN-v1",
@@ -354,6 +353,8 @@ class Pipeline:
             )
 
         # Load classifier
+        from exosphere.ml.infer import MLClassifier
+
         classifier = MLClassifier(str(checkpoints[-1]))
         return classifier.predict(self.state.cleaned_spectrum)
 

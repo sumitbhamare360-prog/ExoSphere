@@ -469,3 +469,15 @@ is logged here.
     (`models/`). Real-spectrum scores flat (~0.15-0.25, undifferentiated).
     Cause under investigation (data scale? architecture?); V2 work. The
     pipeline's placeholder-score path remains correct behavior without a model.
+
+55. **Backend CI dependencies and lazy database initialization (2026-10-12).**
+    `aiosqlite==0.22.1` is a required base dependency because SQLite is the
+    default async database backend. Database engine/session construction is
+    lazy: importing `exosphere.api` no longer imports the SQLite driver or
+    creates a database file; first DB use does. PyTorch/scikit-learn are moved
+    to the explicit `ml` extra because ML inference is optional and imports
+    lazily from the pipeline; ML tests carry an `ml` marker and are excluded
+    from the fast backend gate. A source-import dependency guard checks that
+    every base or optional-ML import maps to a declared distribution. Verified
+    in a new Python 3.11 venv with only `pip install -e ".[dev]"`:
+    134 passed, 1 skipped, 13 deselected; `ruff check .` passed.

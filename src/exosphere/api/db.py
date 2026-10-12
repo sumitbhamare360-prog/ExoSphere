@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 from enum import Enum as PyEnum
+from functools import lru_cache
 
 from sqlalchemy import (
     JSON,
@@ -346,17 +348,32 @@ class Report(Base):
     analysis: Mapped[Analysis] = relationship(back_populates="reports")
 
 
-# Database engine and session
-engine = create_async_engine(
-    settings.database_url.replace("sqlite://", "sqlite+aiosqlite://"),
-    echo=False,
-    pool_pre_ping=True,
-)
+# Database resources are intentionally lazy.  Importing API models is useful for
+# schemas, reporting, and static analysis and must neither import a database
+# driver nor create a SQLite file.  The driver is loaded only when a caller
+# actually opens the engine.
+@lru_cache(maxsize=1)
+def get_engine():
+    """Return the process-local async engine on first database use."""
+    return create_async_engine(
+        settings.database_url.replace("sqlite://", "sqlite+aiosqlite://"),
+        echo=False,
+        pool_pre_ping=True,
+    )
 
-async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+@lru_cache(maxsize=1)
+def get_async_session_maker() -> async_sessionmaker[AsyncSession]:
+    """Return the process-local async session factory on first database use."""
+    return async_sessionmaker(get_engine(), class_=AsyncSession, expire_on_commit=False)
 
 
-async def get_async_session() -> AsyncSession:
+def async_session_maker(*args, **kwargs):
+    """Backward-compatible lazy session-factory entry point."""
+    return get_async_session_maker()(*args, **kwargs)
+
+
+async def get_async_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency for database session."""
     async with async_session_maker() as session:
         yield session
@@ -364,10 +381,13 @@ async def get_async_session() -> AsyncSession:
 
 async def init_db():
     """Initialize database tables."""
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db():
     """Close database connections."""
-    await engine.dispose()
+    if get_engine.cache_info().currsize:
+        await get_engine().dispose()
+    get_async_session_maker.cache_clear()
+    get_engine.cache_clear()

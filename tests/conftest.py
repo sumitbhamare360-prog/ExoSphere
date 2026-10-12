@@ -22,10 +22,10 @@ def reset_database() -> None:
     seeded ids (planets, observations, analyses) collide across modules.
     Imports are deferred so this never binds the database URL early.
     """
-    from exosphere.api.db import Base, engine
+    from exosphere.api.db import Base, get_engine
 
     async def _reset() -> None:
-        async with engine.begin() as conn:
+        async with get_engine().begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 

@@ -6,7 +6,9 @@ import tempfile
 
 import numpy as np
 import pytest
-import torch
+
+pytestmark = pytest.mark.ml
+torch = pytest.importorskip("torch")
 
 from exosphere.forward.model import ModelParams, PlanetFixed
 from exosphere.ml.dataset import (

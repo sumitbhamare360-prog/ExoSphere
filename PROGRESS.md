@@ -396,6 +396,20 @@ SO2 4.8σ, 3-10x solar), Feinstein+2023 (10-30x solar), Powell+2024 MIRI
 
 ## V1 STATUS (final)
 
+### Backend CI dependency repair (2026-10-12)
+
+- Fixed GitHub Actions backend collection failure: declared `aiosqlite==0.22.1`.
+- `exosphere.api` now initializes its async SQLAlchemy engine/session factory
+  lazily, so model imports neither load the database driver nor create a SQLite
+  database file. Added regression coverage for that contract and a static
+  source-import dependency declaration guard.
+- Added `dev` and `ml` extras. The fast backend workflow installs `.[dev]` and
+  excludes optional PyTorch ML tests (`ml` marker); ML remains available via
+  `.[ml]`. Web workflow was not changed.
+- Fresh Python 3.11 venv verification: `pip install -e ".[dev]"`, then
+  `python -m pytest -q -m "not slow and not network and not ml"` => 134 passed,
+  1 skipped, 13 deselected; `python -m ruff check .` => pass.
+
 ### What works
 - End-to-end: archive spectrum -> quality -> preprocess -> ML scores -> dynesty
   retrieval -> nested-model detection -> twin + wording-guarded HTML report,
