@@ -23,6 +23,8 @@ data_cache/
 *.sqlite*
 *.sqlite-journal
 outputs/
+*.log
+application.log
 
 # Editors / OS
 .vscode/
