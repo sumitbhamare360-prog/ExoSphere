@@ -481,3 +481,11 @@ is logged here.
     every base or optional-ML import maps to a declared distribution. Verified
     in a new Python 3.11 venv with only `pip install -e ".[dev]"`:
     134 passed, 1 skipped, 13 deselected; `ruff check .` passed.
+
+56. **Continuation session (2026-10-12).** EXO-000002 finalized (all 5 nested
+    detections stored, provenance backfilled, status COMPLETED); its standard
+    report verified current; `outputs/l3_wasp39b.md` regenerated final.
+    Removed 560 MB of abandoned local CI venvs (`.ci-venv/`, `.ci311-clean/`,
+    `.ci311-minimal/`); added `.ci*/` + `models/` to `.gitignore`. Fixed
+    cross-module test-DB contamination (shared engine wiped per module
+    fixture). Gates: backend 161 passed, ruff clean, web 42 passed + build.

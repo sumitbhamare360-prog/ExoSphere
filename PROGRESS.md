@@ -317,13 +317,15 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
   fresh-seed confirmed). SO2 nested never completed (4/5 molecules).
 - ML scores all 0.00 (no trained model; `models/` empty — training pending).
 
-### Open issues (carried into Phase 9b)
+### Open issues (carried into Phase 9b — all resolved, see Phase 9b)
 
 - ~~Real WASP-39 b report blocked on SO2 row + converged standard retrieval.~~
   RESOLVED 2026-10-11: SO2 ln B = -9.20 (clean negative); pilot report rebuilt:
   `data_cache/reports/EXO-000001_report.html` (summary: GOOD data, T = 1976
   [1782, 2254] K, H2O + CO2 supported, CH4/CO/SO2 not supported, ML placeholders).
-- ML training (3000 samples + CNN) never completed; L2 suite never ran.
+- ~~ML training (3000 samples + CNN) never completed; L2 suite never ran.~~
+  RESOLVED 2026-10-11/12: CNN-v1 trained (honest failure, AUC ~chance, see Phase 5);
+  L2 full suite PASS 24/24 (see Phase 4 supplement).
 - Background workers die within ~10 min in this environment; foreground chunks only.
 - Thermal throttling active; bound-refit overhead dominates at high nlive.
 
@@ -391,8 +393,24 @@ SO2 4.8σ, 3-10x solar), Feinstein+2023 (10-30x solar), Powell+2024 MIRI
 - n_live=500 mains infeasible here (bound overhead); full-500 nested (~100 h) out of reach.
 - Nested lnB below ~30 carries sampler systematics; CO-class verdicts need the
   point-removal cross-check (now built into run_l3.py).
-- ML untrained; L2 full suite unrun (runner ready); no in-browser checks anywhere.
+- ML classifier trained but at chance level (V2 work); L2 full suite PASS (see Phase 4
+  supplement); no in-browser checks anywhere.
 - Background workers die within ~10 min; foreground-only execution.
+
+## Phase 9b completion notes (2026-10-12, continued session)
+
+- EXO-000002 finalized: all 5 nested detections stored (H2O +196.2, CO2 +191.0,
+  CO +9.3 gated by POOR quality, CH4 +0.6, SO2 -3.5), provenance backfilled,
+  status COMPLETED; standard report `data_cache/reports/EXO-000002_report.html`
+  verified current (3 figures, wording guard passes).
+- `outputs/l3_wasp39b.md` regenerated final: (a) PASS round-trip exact; (b) PARTIAL
+  (H2O/CO2/CH4/SO2 agree, CO gated); (c) T FAIL cool mode / metallicity, C/O, CH4-UL
+  PASS; (d) FAIL reduced chi2 41; (e) PASS; stability FAIL-by-letter (bimodality
+  documented: seeds 42/123 cool mode agree, seed 7 hot mode at comparable evidence).
+- Removed 560 MB of abandoned local CI venvs (`.ci-venv/`, `.ci311-clean/`,
+  `.ci311-minimal/`); added `.ci*/` + `models/` to `.gitignore`.
+- Gates 2026-10-12: backend **161 passed** (2 network deselected), ruff clean;
+  web lint 0 errors, **42 passed**, build green.
 
 ## V1 STATUS (final)
 
