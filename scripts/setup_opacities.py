@@ -1,159 +1,179 @@
-"""Opacity setup helper for petitRADTRANS.
+"""Opacity setup for real petitRADTRANS (pRT 3.4, correlated-k R1000).
 
-Checks PRT_INPUT_DATA_PATH, lists which species files are present/missing for
-the V1 molecule set (H2O, CO2, CO, CH4, SO2 plus H2-H2/H2-He CIA and Rayleigh),
-and downloads what pRT supports downloading.
+V1 file manifest (verified against the Keeper share; sizes in bytes as served).
+Paths are relative to the pRT input-data root (PRT_INPUT_DATA_PATH), which
+must contain the standard ``opacities/...`` layout (see pRT docs, "Setting up
+the input_data directory").
 
-On Windows + Python 3.13, real pRT cannot be installed (see DECISIONS.md item 20).
-This script documents the expected opacity files and provides a mock mode.
+Keeper downloads use plain HTTPS (no selenium): the share answers direct
+``/files/?p=<path>&dl=1`` links. TLS needs the certifi CA bundle on this box
+(system store lacks the HARICA academic CA).
+
+Usage (run with the pRT venv so ``certifi``/``requests`` exist):
+    .\\.venv311\\Scripts\\python.exe scripts/setup_opacities.py --status
+    .\\.venv311\\Scripts\\python.exe scripts/setup_opacities.py --download
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+import time
+import urllib.parse
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from exosphere.core.config import load_config  # noqa: E402
+KEEPER_BASE = "https://keeper.mpdl.mpg.de/d/ccf25082fda448c8a0d0/files/?p="
 
-# V1 molecule set + background
-REQUIRED_SPECIES = [
-    "H2O",
-    "CO2",
-    "CO",
-    "CH4",
-    "SO2",
-    "H2-H2",
-    "H2-He",
-    "Rayleigh",
+# (relative path under input_data root, served size in bytes or None)
+# Sizes verified 2026-10-12 via response headers.
+V1_FILES: list[tuple[str, int | None]] = [
+    (
+        "opacities/lines/correlated_k/H2O/1H2-16O/"
+        "1H2-16O__POKAZATEL.R1000_0.3-50mu.ktable.petitRADTRANS.h5",
+        388997984,
+    ),
+    (
+        "opacities/lines/correlated_k/CO2/12C-16O2/"
+        "12C-16O2__UCL-4000.R1000_0.3-50mu.ktable.petitRADTRANS.h5",
+        388998528,
+    ),
+    (
+        "opacities/lines/correlated_k/CO/12C-16O/"
+        "12C-16O__HITEMP.R1000_0.1-250mu.ktable.petitRADTRANS.h5",
+        128730792,
+    ),
+    (
+        "opacities/lines/correlated_k/CH4/12C-1H4/"
+        "12C-1H4__HITEMP.R1000_0.1-250mu.ktable.petitRADTRANS.h5",
+        158406312,
+    ),
+    (
+        "opacities/lines/correlated_k/SO2/32S-16O2/"
+        "32S-16O2__ExoAmes.R1000_0.3-50mu.ktable.petitRADTRANS.h5",
+        388998528,
+    ),
 ]
 
-# Expected file patterns in pRT input data directory
-# pRT expects files like: H2O_R_1000_0.3-30mu.h5, etc.
-FILE_PATTERNS = {
-    "H2O": "H2O_*.h5",
-    "CO2": "CO2_*.h5",
-    "CO": "CO_*.h5",
-    "CH4": "CH4_*.h5",
-    "SO2": "SO2_*.h5",
-    "H2-H2": "H2-H2_*.h5",
-    "H2-He": "H2-He_*.h5",
-    "Rayleigh": "Rayleigh_*.h5",
-}
-
-# Low-resolution mode: R=1000, wavelength range 0.3-30 um (covers 0.6-5.3 um)
-DEFAULT_RESOLUTION = 1000
-DEFAULT_WAVE_RANGE = (0.3, 30.0)  # um
+# CIA files (H2-H2, H2-He) are still needed: ~20 Keeper path variants probed
+# without a hit (see DECISIONS.md). The backend runs without CIA files until
+# their exact share paths are known; Rayleigh needs no files (analytic).
+PENDING_CIA = ["H2-H2 (BoRi)", "H2-He (BoRi)"]
 
 
-def check_opacity_dir(opacity_dir: Path) -> dict[str, list[Path]]:
-    """Check which opacity files are present."""
-    found = {}
-    missing = {}
-    for species, pattern in FILE_PATTERNS.items():
-        files = list(opacity_dir.glob(pattern))
-        if files:
-            found[species] = files
-        else:
-            missing[species] = pattern
-    return {"found": found, "missing": missing}
+def input_data_root(explicit: str | None = None) -> Path:
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    from exosphere.core.config import load_config
 
-
-def print_status(opacity_dir: Path) -> int:
-    """Print opacity status and return exit code (0 if all found, 1 if missing)."""
-    print(f"Checking opacity directory: {opacity_dir}")
-    print(
-        f"Resolution: R={DEFAULT_RESOLUTION}, "
-        f"range: {DEFAULT_WAVE_RANGE[0]}-{DEFAULT_WAVE_RANGE[1]} um"
-    )
-    print()
-
-    result = check_opacity_dir(opacity_dir)
-
-    if result["found"]:
-        print("FOUND:")
-        for species, files in result["found"].items():
-            for f in files:
-                print(f"  {species}: {f.name}")
-    else:
-        print("FOUND: (none)")
-
-    print()
-    if result["missing"]:
-        print("MISSING:")
-        for species, pattern in result["missing"].items():
-            print(f"  {species}: {pattern}")
-        print()
-        print("Run with --download to attempt download (requires working pRT install).")
-        return 1
-    else:
-        print("All required opacity files present.")
-        return 0
-
-
-def download_opacities(opacity_dir: Path, resolution: int = DEFAULT_RESOLUTION) -> int:
-    """Attempt to download opacities using pRT's built-in downloader.
-
-    Requires a working pRT installation. On Windows+Python3.13 this will fail;
-    see DECISIONS.md item 20.
-    """
-    try:
-        from petitRADTRANS import Radtrans
-    except ImportError as e:
-        print(f"ERROR: pRT not installed: {e}")
-        print("Real pRT installation required for download. See DECISIONS.md item 20.")
-        print("Use mock mode instead: python scripts/plot_forward_examples.py")
-        return 1
-
-    print(f"Downloading opacities to {opacity_dir} at R={resolution}...")
-    # pRT's Radtrans constructor downloads missing files when path is set
-    # This is a placeholder - actual download depends on pRT version
-    try:
-        _ = Radtrans(
-            line_species=list(REQUIRED_SPECIES[:5]),  # H2O, CO2, CO, CH4, SO2
-            rayleigh_species=["H2", "He"],
-            continuum_opacities=["H2-H2", "H2-He"],
-            wlen_bords_micron=DEFAULT_WAVE_RANGE,
-            mode="c-k",
+    cfg = load_config()
+    root = Path(
+        __import__("os").environ.get(
+            "PRT_INPUT_DATA_PATH", str(cfg.data_cache_dir / "prt_input_data")
         )
-        print("Download attempted (check pRT logs).")
-        return 0
-    except Exception as e:
-        print(f"Download failed: {e}")
-        return 1
+    )
+    return root.expanduser().resolve()
+
+
+def _session():
+    import certifi
+    import requests
+
+    session = requests.Session()
+    session.verify = certifi.where()
+    return session
+
+
+def download_file(session, rel_path: str, dest: Path, expected_size: int | None) -> str:
+    """Download one Keeper file; skip if present with matching size. Returns status."""
+    if dest.exists() and expected_size and dest.stat().st_size == expected_size:
+        return "cached"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = KEEPER_BASE + urllib.parse.quote("/" + rel_path, safe="") + "&dl=1"
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with session.get(url, timeout=600, stream=True, allow_redirects=True) as response:
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "octet-stream" not in content_type:
+            raise RuntimeError(f"unexpected content-type {content_type!r} for {rel_path}")
+        total = int(response.headers.get("content-length", "0") or 0)
+        done = 0
+        start = __import__("time").time()
+        with open(tmp, "wb") as handle:
+            for chunk in response.iter_content(1 << 20):
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                done += len(chunk)
+                if total:
+                    print(
+                        f"\r  {dest.name}: {done / 1e6:.0f}/{total / 1e6:.0f} MB "
+                        f"({done / max(time.time() - start, 1e-6) / 1e6:.1f} MB/s)",
+                        end="",
+                    )
+        print()
+    # HDF5 magic check
+    with open(tmp, "rb") as handle:
+        magic = handle.read(8)
+    if magic != b"\x89HDF\r\n\x1a\n":
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"{rel_path}: not an HDF5 file (bad magic)")
+    if expected_size and tmp.stat().st_size != expected_size:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"{rel_path}: size mismatch after download")
+    tmp.replace(dest)
+    digest = hashlib.sha256(dest.read_bytes()).hexdigest()[:16]
+    return f"downloaded sha256:{digest}"
+
+
+def status(root: Path) -> int:
+    print(f"pRT input-data root: {root}")
+    print("V1 correlated-k files (R1000):")
+    missing = 0
+    total_bytes = 0
+    for rel_path, size in V1_FILES:
+        dest = root / rel_path
+        if dest.exists():
+            state = f"present ({dest.stat().st_size / 1e6:.0f} MB)"
+            total_bytes += dest.stat().st_size
+        else:
+            state = f"MISSING (expected ~{size / 1e6:.0f} MB)"
+            missing += 1
+        print(f"  [{state}] {rel_path}")
+    print(f"on-disk V1 total: {total_bytes / 1e6:.0f} MB")
+    print(f"CIA still pending (backend runs without): {', '.join(PENDING_CIA)}")
+    print("Rayleigh H2/He: analytic in pRT, no files needed.")
+    return 1 if missing else 0
+
+
+def download(root: Path) -> int:
+    session = _session()
+    failures = 0
+    for rel_path, size in V1_FILES:
+        dest = root / rel_path
+        try:
+            print(f"{dest.name}: {download_file(session, rel_path, dest, size)}")
+        except Exception as error:
+            print(f"{dest.name}: FAILED: {error}")
+            failures += 1
+    return 1 if failures else status(root)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--path", help="Opacity data directory (default: $PRT_INPUT_DATA_PATH or config)"
-    )
-    parser.add_argument(
-        "--download", action="store_true", help="Attempt to download missing opacities via pRT"
-    )
-    parser.add_argument(
-        "--resolution", type=int, default=DEFAULT_RESOLUTION, help="Spectral resolution R"
-    )
+    parser.add_argument("--path", help="input-data root (default: $PRT_INPUT_DATA_PATH)")
+    parser.add_argument("--download", action="store_true", help="fetch the V1 files")
+    parser.add_argument("--status", action="store_true", help="report present/missing (default)")
     args = parser.parse_args(argv)
-
-    cfg = load_config()
-    opacity_dir = Path(args.path) if args.path else cfg.prt_input_data_path
-
-    if opacity_dir is None:
-        print("ERROR: PRT_INPUT_DATA_PATH not set. Set environment variable or use --path.")
-        return 1
-
-    opacity_dir = Path(opacity_dir).expanduser().resolve()
-    opacity_dir.mkdir(parents=True, exist_ok=True)
-
+    root = input_data_root(args.path)
+    root.mkdir(parents=True, exist_ok=True)
     if args.download:
-        return download_opacities(opacity_dir, args.resolution)
-    else:
-        return print_status(opacity_dir)
+        return download(root)
+    return status(root)
 
 
 if __name__ == "__main__":
