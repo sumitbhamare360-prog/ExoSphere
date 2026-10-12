@@ -1,5 +1,10 @@
 # ExoSphere
 
+> **Forward model is currently a MOCK, not petitRADTRANS.** Results come from an
+> isothermal, constant-abundance, 5-gas analytic approximation
+> (`opacity_mode = mock-gaussian-R1000`). Real pRT cannot build on this box
+> (Windows + Python 3.13 + numpy 2.x); see `DECISIONS.md` item 20.
+
 End-to-end exoplanet atmospheric characterization platform:
 observed JWST transmission spectrum -> molecular signatures -> Bayesian atmospheric
 retrieval -> posteriors/uncertainty -> dashboard + 3D scientific digital twin.
@@ -25,8 +30,10 @@ Optional environment variables:
 |---|---|---|
 | `PRT_INPUT_DATA_PATH` | petitRADTRANS opacity data directory (needed only from the forward-model phase onwards) | unset |
 
-Note: petitRADTRANS, JAX/JAXNS, dynesty, and torch are intentionally **not** installed in
-Phase 0; they are added in later phases per `DECISIONS.md`.
+Note: petitRADTRANS and JAX/JAXNS are intentionally **not** installed (see
+`DECISIONS.md` item 20); dynesty 2.1.5 is pinned and used. torch/scikit-learn
+are optional (`pip install -e ".[ml]"`); without them, ML tests are deselected
+and the pipeline emits labelled placeholder scores.
 
 ## Run checks
 
@@ -166,7 +173,7 @@ Every number shown anywhere carries a posterior/credible interval or an explicit
 | Level | Status (2026-10-11) |
 |---|---|
 | L1 data round-trip | PASS (test + L3 recheck: 147 pts, max abs diff 0.0) |
-| L2 synthetic | NOT RUN (runner repaired and ready; needs ~hours of compute) |
+| L2 synthetic | PASS (24/24 runs, all params >= 88% in 95% CI; detection pattern correct, 1 documented borderline) |
 | L3 real WASP-39 b | PARTIAL/FAIL overall: H2O + CO2 supported (agree with literature), CH4 absent (agree), SO2 unconfirmed with PRISM-only data; T cool-mode too cool, reduced chi2 ~41, seed bimodality documented. Full table: `outputs/l3_wasp39b.md` |
 
 ## Known limitations

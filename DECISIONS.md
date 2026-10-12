@@ -489,3 +489,14 @@ is logged here.
     `.ci311-minimal/`); added `.ci*/` + `models/` to `.gitignore`. Fixed
     cross-module test-DB contamination (shared engine wiped per module
     fixture). Gates: backend 161 passed, ruff clean, web 42 passed + build.
+
+57. **Push/hygiene + declared-dependency verification (2026-10-12).**
+    `git rm --cached` untracked `application.log`, `exosphere.db`,
+    `models/best_model.pt` (dev artifacts that were accidentally committed;
+    all regenerable, all gitignored going forward). Added explicit
+    `greenlet==3.5.6` (required at runtime by SQLAlchemy asyncio, previously
+    only transitive). Verified torch laziness structurally AND empirically: a
+    brand-new Python 3.11 venv with only `pip install -e ".[dev]"` imports
+    `exosphere.api/pipeline/report` fine, and runs 134 passed / 1 skipped /
+    13 deselected + ruff clean — no code change needed (torch lives only in
+    lazily-imported `ml/*`, tests carry the `ml` marker).

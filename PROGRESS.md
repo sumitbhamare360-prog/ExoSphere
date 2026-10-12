@@ -1,5 +1,16 @@
 # PROGRESS.md — ExoSphere
 
+## Current status (2026-10-12)
+
+- End-to-end pipeline works: archive spectrum -> quality -> ML -> dynesty
+  retrieval -> nested detection -> twin + guarded HTML report (161 pytest green).
+- L1 PASS (exact round-trip); L2 PASS (24/24 runs, all params >= 88% in 95% CI).
+- L3 PARTIAL/FAIL overall: H2O/CO2 supported, CH4 absent, SO2 unconfirmed (agree
+  with literature); T/fit/stability FAILs documented as mock-model limits.
+- CNN-v1 trained but at chance level (honest failure, V2 work); reports + docs
+  list `data_cache/reports/EXO-00000{1..4}_report.html`, `outputs/l3_wasp39b.md`.
+- Known env limits: foreground-only long runs, throttled CPU, no pRT (mock model).
+
 ## Phase 0 — project scaffold + core schema (done, commit `76723aa`)
 
 - Repo scaffold: `pyproject.toml` (pinned deps, pytest + ruff config), `AGENTS.md`,
@@ -162,7 +173,7 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 
 ### Next step
 
-**Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).
+~~**Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).~~ -> done (dashboard + twin, see Phase 8; report generator, see Phase 9a).
 
 ## Phase 5 --- ML molecule classifier (model trained 2026-10-11; performance poor, honestly reported)
 
@@ -259,9 +270,9 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
 
 ### Next step
 
-**Phase 9** (see `PHASE_PROMPTS.md`): validation levels L1/L2/L3 test suite.
+~~**Phase 9** (see `PHASE_PROMPTS.md`): validation levels L1/L2/L3 test suite.~~ -> done, see Phases 9a/9b below.
 
-## Phase 9a --- Scientific report generator (done, code; real report pending L3)
+## Phase 9a --- Scientific report generator (done; real reports built, see Phase 9b)
 
 ### What was built
 
@@ -314,7 +325,7 @@ all broken, outside repo layout, broke `ruff check .`), `DECISIONS.md`, `PROGRES
 - Retrieval converged: logz=-836.5±1.4, T~1600-2000 K, H2O/CO2 ~-1.2 to -2.7 dex,
   r_ref~1.29, high cloud. Best-fit logl=-815, but reduced chi2 remains large (mock limits).
 - Detection: H2O +172, CO2 +165 (supported); CO -8.2, CH4 -8.2 (not constrained,
-  fresh-seed confirmed). SO2 nested never completed (4/5 molecules).
+  fresh-seed confirmed); SO2 -9.2 (clean negative, completed 2026-10-11).
 - ML scores all 0.00 (no trained model; `models/` empty — training pending).
 
 ### Open issues (carried into Phase 9b — all resolved, see Phase 9b)
