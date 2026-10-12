@@ -451,4 +451,5 @@ SO2 4.8σ, 3-10x solar), Feinstein+2023 (10-30x solar), Powell+2024 MIRI
 ### Suggested V2 start
 1. Real pRT/Linux + JAX-traceable model (unlocks JAXNS + emulator). 2. Train the
    CNN on the 3k (then 20k) dataset. 3. Run L2 full + L3 at n_live=500 on a bigger
-   box. 4. G395H/NIRISS modes + multi-observation fusion. 5. Stellar contamination.
+   box. 4. G395H/NIRISS modes + multi-observation fusion. 5. Stellar contamination..
+   
