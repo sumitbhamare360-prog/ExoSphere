@@ -23,6 +23,23 @@ DEFAULT_DATA_DIR = Path("data_cache/ml")
 DEFAULT_MODEL_DIR = Path("models")
 
 
+class WeightedBCE(nn.Module):
+    """Binary cross-entropy with per-class positive weights (for ~18% positives)."""
+
+    def __init__(self, pos_weight: torch.Tensor) -> None:
+        super().__init__()
+        self.register_buffer(
+            "pos_weight", torch.as_tensor(pos_weight, dtype=torch.float32)
+        )
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        eps = 1e-7
+        pred = pred.clamp(eps, 1.0 - eps)
+        pw = self.pos_weight.to(pred.device)
+        loss = -(pw * target * torch.log(pred) + (1.0 - target) * torch.log(1.0 - pred))
+        return loss.mean()
+
+
 class Trainer:
     """Training loop for MoleculeCNN."""
 
@@ -34,13 +51,19 @@ class Trainer:
         device: torch.device,
         lr: float = 1e-3,
         weight_decay: float = 1e-5,
+        pos_weight: list[float] | torch.Tensor | None = None,
     ):
         self.model = model.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
 
-        self.criterion = nn.BCELoss()
+        if pos_weight is None:
+            self.criterion: nn.Module = nn.BCELoss()
+        else:
+            if not isinstance(pos_weight, torch.Tensor):
+                pos_weight = torch.tensor(pos_weight, dtype=torch.float32)
+            self.criterion = WeightedBCE(pos_weight)
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=5
@@ -322,6 +345,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train ML molecule classifier")
     parser.add_argument("--n-samples", type=int, default=3000, help="Number of training samples")
     parser.add_argument("--epochs", type=int, default=50, help="Max epochs")
+    parser.add_argument("--patience", type=int, default=25, help="Early-stopping patience")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
@@ -397,7 +421,7 @@ def main():
     trainer = Trainer(model, train_loader, val_loader, device, lr=args.lr)
     history = trainer.train(
         epochs=args.epochs,
-        patience=10,
+        patience=args.patience,
         save_path=Path(args.model_dir) / "best_model.pt",
         model_version="CNN-v1",
         dataset_hash=dataset_hash,

@@ -280,6 +280,43 @@ class TestMLIntegration:
         assert checkpoint["seed"] == 42
 
 
+class TestInputTransform:
+    """standardize-v1: per-sample, inference-safe, deterministic."""
+
+    def test_removes_baseline_and_scales_features(self):
+        from exosphere.ml.dataset import standardize_spectrum
+
+        rng = np.random.default_rng(0)
+        depth = 0.02 + 1e-4 * rng.normal(size=147)
+        unc = np.full(147, 1e-4)
+        depth_t, unc_t = standardize_spectrum(depth, unc)
+        assert abs(float(np.median(depth_t))) < 1e-6
+        assert depth_t.std() > 0.5  # features at unit scale, not 1e-4
+        assert np.all(np.isfinite(depth_t)) and np.all(np.isfinite(unc_t))
+
+    def test_deterministic_and_shape_preserving(self):
+        from exosphere.ml.dataset import standardize_spectrum
+
+        depth = np.linspace(0.019, 0.023, 147)
+        unc = np.full(147, 2e-4)
+        first = standardize_spectrum(depth, unc)
+        second = standardize_spectrum(depth, unc)
+        np.testing.assert_array_equal(first[0], second[0])
+        assert first[0].shape == (147,) and first[1].shape == (147,)
+
+    def test_weighted_bce_downweights_majority(self):
+        from exosphere.ml.train import WeightedBCE
+
+        crit = WeightedBCE([4.0])
+        pred = torch.full((8, 1), 0.2)
+        target = torch.zeros(8, 1)
+        plain = torch.nn.BCELoss()(pred, target).item()
+        weighted = crit(pred, target).item()
+        assert weighted == pytest.approx(plain)  # negatives unaffected by pos_weight
+        target_pos = torch.ones(8, 1)
+        assert crit(pred, target_pos).item() > torch.nn.BCELoss()(pred, target_pos).item()
+
+
 class TestEndToEnd:
     """End-to-end tests (marked slow)."""
 

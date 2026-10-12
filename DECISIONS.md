@@ -433,14 +433,6 @@ is logged here.
     as contingency). Full-nlive-500 nested everywhere is infeasible (~100 h);
     noted as a limitation, not a silent cut.
 
-50. **Proposal method: `rwalk` default (timed shootout, corrected landscape).**
-    Real spectrum, nlive=50, 400 iters, seed 42: rwalk reached loglmax=-1011
-    in 209 s / 7422 calls vs rslice -1057 in 277 s / 10785 calls. rwalk's
-    covariance-adapted proposals suit the narrow T/r_ref/abundance ridges;
-    rslice decayed to ~3% efficiency (60+ calls/iter) at nlive=500 and stalled
-    a standard run. Sampler-efficiency choice, not result tuning; runs stay
-    seeded/deterministic. CI-grade EXO-000001 used rslice (recorded).
-
 51. **Capped runs are invalid evidence.** An L2 fast subset at maxcall=20000
     recovered 1/8 and 0/8 params in 95% CI; the same cases at maxcall=60000
     recover 8/8. dynesty's dlogz also misfires on flat plateaus (it measures
@@ -500,3 +492,29 @@ is logged here.
     `exosphere.api/pipeline/report` fine, and runs 134 passed / 1 skipped /
     13 deselected + ruff clean — no code change needed (torch lives only in
     lazily-imported `ml/*`, tests carry the `ml` marker).
+
+58. **CNN root cause: unscaled inputs + starved training budget (2026-10-12).**
+    Audit on the frozen 3000 samples ruled OUT data corruption (no NaN/inf),
+    chunk misalignment (regen-20 bit-exact), and label noise (median- vs
+    per-sample-noise labels agree on 96%+; a 4% disagreement cannot explain
+    chance-level). Decisive experiments: logistic regression / gradient
+    boosting on 14 band-depth features reach AUC 0.97-1.00, so the labels ARE
+    learnable and the task is NOT too hard — the CNN pipeline was broken.
+    Overfit-64: raw inputs stall at BCE 0.44 (majority-class) and reach only
+    0.14 after 400 epochs, while robustly standardized inputs reach 0.06:
+    raw depth is DC-dominated (median 0.019 vs feature std ~1e-4) with a flat
+    uncertainty channel, so discriminative directions start ~100x below the
+    baseline variation. Worse, real training ran only ~430 gradient steps
+    before early stopping — the same order needed just to memorize 64 samples.
+    Fix (no data regen): per-sample `standardize-v1`
+    (`(depth-median)/MAD`, `log10(sigma)+4.0`, inference-safe by construction,
+    recorded in checkpoints, legacy checkpoints default to raw), per-class
+    positive weights (~4.5x for ~18% positives), patience 10 -> 25. Retrained
+    CNN-v2 on the same 3000 in ~2 min: test AUC H2O 0.999, CO2 0.999, CO 1.000,
+    CH4 1.000, SO2 0.999 (target H2O/CO2 >= 0.9 met). ECE still poor
+    (0.76-0.83, expected under class weights) — scores need recalibration
+    before use as probabilities (V2). Real WASP-39 b: CO2 0.94, H2O 0.26
+    (weak miss), CO 0.07, CH4 0.44, SO2 0.50 — credible domain gap, reported
+    as candidate scores only. Labels left unchanged (4% impact, documented).
+    Dataset used the MOCK forward model and must be regenerated once real pRT
+    is in (task requirement, recorded here).

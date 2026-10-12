@@ -7,8 +7,9 @@
 - L1 PASS (exact round-trip); L2 PASS (24/24 runs, all params >= 88% in 95% CI).
 - L3 PARTIAL/FAIL overall: H2O/CO2 supported, CH4 absent, SO2 unconfirmed (agree
   with literature); T/fit/stability FAILs documented as mock-model limits.
-- CNN-v1 trained but at chance level (honest failure, V2 work); reports + docs
-  list `data_cache/reports/EXO-00000{1..4}_report.html`, `outputs/l3_wasp39b.md`.
+- CNN-v2 recovers the classifier (test AUC ~1.0 all molecules; real-spectrum scores
+  differentiated; calibration still V2 work); reports + docs list
+  `data_cache/reports/EXO-00000{1..4}_report.html`, `outputs/l3_wasp39b.md`.
 - Known env limits: foreground-only long runs, throttled CPU, no pRT (mock model).
 
 ## Phase 0 — project scaffold + core schema (done, commit `76723aa`)
@@ -175,27 +176,42 @@ transmission spectra (147 and 207 points, 0.52-5.34 um) -> SHA256 checksums
 
 ~~**Phase 7** (see `PHASE_PROMPTS.md`): Report generation, web dashboard (React + TypeScript + Plotly + three.js).~~ -> done (dashboard + twin, see Phase 8; report generator, see Phase 9a).
 
-## Phase 5 --- ML molecule classifier (model trained 2026-10-11; performance poor, honestly reported)
+## Phase 5 --- ML molecule classifier (CNN-v2 recovers it, 2026-10-12)
 
 - `src/exosphere/ml/`: `dataset.py` (synthetic spectra from forward/, label = logVMR >= -6
   AND feature amplitude > noise, seeded, config hash), `model.py` (1D CNN: 4 conv blocks
-  [32,64,128,256] + GAP + dense(128) + sigmoid(5); BCE, Adam 1e-3), `train.py`
-  (early stopping patience 10, checkpoint with model/dataset-hash/version/seed),
+  [32,64,128,256] + GAP + dense(128) + sigmoid(5); BCE loss, Adam 1e-3), `train.py`
+  (early stopping, checkpoint with model/dataset-hash/version/seed),
   `infer.py` (`predict(spectrum)` -> MLResult, scores labelled "ML candidate score").
-- Training 2026-10-11: 3000 spectra (6x500 chunks, seeds 42-47, `data_cache/ml/chunks/`),
-  50 epochs max, early stop epoch 13. Test metrics (`models/test_metrics.json`):
-  AUC H2O 0.59, CO2 0.40, CO 0.45, CH4 0.47, SO2 0.45 (chance level); ECE 0.55-0.80;
-  precision/recall degenerate. **The model learned essentially nothing** — recorded as
-  a failure per Phase 5 orders (suspects: data scale, architecture, calibration; V2 work).
-  Artifacts: `models/best_model.pt` (CNN-v1, dataset hash `chunks6x500-seeds42-47-n3000`),
-  `training_history.json`. Real WASP-39 b scores: flat 0.15-0.25, undifferentiated,
-  consistent with a chance-level model. Pipeline placeholder-score path (no model) unchanged.
+- First training 2026-10-11 (CNN-v1): test AUC 0.40-0.59 (chance), ECE 0.55-0.80 —
+  recorded as honest failure. Root cause found 2026-10-12 by audit on the frozen
+  3000 samples (DECISIONS 58): NOT data corruption (no NaN/inf), NOT misalignment
+  (regen-20 bit-exact), NOT label noise (median- vs per-sample-noise labels agree
+  96%+); LR/GB baselines on 14 band features hit AUC 0.97-1.00, proving learnability.
+  Causes: (1) unscaled DC-dominated inputs (median depth 0.019 vs feature std ~1e-4,
+  flat uncertainty channel) — raw-input overfit-64 stalls at BCE 0.44 vs 0.06 scaled;
+  (2) starved budget (~430 gradient steps before early stop ≈ cost of memorizing 64).
+- Fix (no data regen): per-sample `standardize-v1` in `dataset.py` (inference-safe,
+  recorded in checkpoints, legacy defaults raw), per-class weights in `Trainer`,
+  patience default 25, same transform in `infer.predict`. Retrained CNN-v2
+  (`models/cnn-v2.pt`, 120 epochs, ~2 min): test AUC H2O 0.999, CO2 0.999, CO 1.000,
+  CH4 1.000, SO2 0.999 (target >= 0.9 met); precision 0.85-0.97, recall 0.96-1.0;
+  ECE still 0.76-0.83 (expected under class weights — recalibration is V2 work).
+- Real WASP-39 b (CNN-v2): CO2 0.94, H2O 0.26 (weak miss), CO 0.07, CH4 0.44,
+  SO2 0.50 — credible synthetic-to-real domain gap; candidate scores only, verdicts
+  untouched. Dataset used the MOCK forward model; regenerate with real pRT when in.
 - Tests: `tests/test_ml.py` (labels, dataset determinism, architecture, inference schema,
-  checkpointing, tiny training run).
+  checkpointing, tiny training run, input-transform + weighted-loss units).
+
+- First training 2026-10-11 (superseded): 50 epochs max, early stop epoch 13. Test metrics
+  (`models/test_metrics.json`): AUC H2O 0.59, CO2 0.40, CO 0.45, CH4 0.47, SO2 0.45
+  (chance level); ECE 0.55-0.80; precision/recall degenerate. Artifacts kept as
+  `models/best_model.pt` (CNN-v1). Real-spectrum scores then: flat 0.15-0.25.
+  Pipeline placeholder-score path (no model) unchanged throughout.
 
 ### Open issues (Phase 5)
 
-- Model quality is the top ML risk for V2 (needs scale/architecture/calibration work).
+- Score calibration (ECE ~0.8) is the top ML risk for V2, alongside data scale/architecture.
 - `Trainer.train` previously dropped dataset_hash/seed at checkpointing (fixed + backfilled).
 
 ## Phase 4 (supplement, 2026-10-11) --- L2 synthetic validation: PASS

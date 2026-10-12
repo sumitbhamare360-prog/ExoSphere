@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from exosphere.core.spectrum import Spectrum
-from exosphere.ml.dataset import MOLECULES, load_target_grid
+from exosphere.ml.dataset import MOLECULES, load_target_grid, standardize_spectrum
 from exosphere.ml.model import MoleculeCNN
 from exosphere.ml.result import MLResult
 
@@ -127,6 +127,16 @@ class MLClassifier:
         """
         # Interpolate to training grid
         depth_interp, unc_interp, warnings = self._interpolate_to_training_grid(spectrum)
+
+        # Input transform must match training: checkpoints record it in
+        # model_config["input_transform"]; legacy checkpoints (raw inputs).
+        transform = (self.checkpoint.get("model_config", {}) or {}).get(
+            "input_transform", "raw"
+        )
+        if transform == "standardize-v1":
+            depth_interp, unc_interp = standardize_spectrum(depth_interp, unc_interp)
+        elif transform != "raw":
+            warnings = [*warnings, f"Unknown input transform {transform!r}; using raw inputs"]
 
         # Prepare input tensor: (1, 2, n_wavelength)
         depth_tensor = torch.from_numpy(depth_interp.astype(np.float32)).unsqueeze(0).unsqueeze(0)

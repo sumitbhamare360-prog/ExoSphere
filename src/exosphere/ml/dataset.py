@@ -31,6 +31,31 @@ DEFAULT_FIXED = PlanetFixed(
 
 # Molecule order (matches forward model)
 MOLECULES = ["H2O", "CO2", "CO", "CH4", "SO2"]
+
+#: Version tag for the input transform below. Bumped whenever the transform
+#: changes; recorded in model checkpoints so train/inference skew is visible.
+INPUT_TRANSFORM_VERSION = "standardize-v1"
+
+
+def standardize_spectrum(
+    depth: np.ndarray, uncertainty: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Standardize one spectrum for the CNN (``standardize-v1``).
+
+    Depth channel: ``(depth - median(depth)) / MAD(depth)`` — removes the
+    wildly varying baseline (r_ref +/-30% moves depth 0.01-0.036 while
+    features are ~1e-4) that otherwise dominates every activation.
+    Uncertainty channel: ``log10(sigma) + 4.0`` (fixed shift, no data
+    statistics). Strictly per-sample: identical computation at train and
+    inference time, so no train/serve skew is possible.
+    """
+    depth = np.asarray(depth, dtype=np.float64)
+    unc = np.asarray(uncertainty, dtype=np.float64)
+    med = float(np.median(depth))
+    mad = float(np.median(np.abs(depth - med))) + 1e-12
+    depth_t = (depth - med) / mad
+    unc_t = np.log10(np.maximum(unc, 1e-12)) + 4.0
+    return depth_t.astype(np.float32), unc_t.astype(np.float32)
 N_MOLECULES = len(MOLECULES)
 
 # Default dataset parameters
